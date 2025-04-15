@@ -1190,7 +1190,6 @@ ${ prContext }`;
 // --- Public Event Handler Wrapper --- (Handles deduplication and filtering)
 async function handleSlackEvent(event, body) {
     // *** ADDED: Log raw event object at the very start ***
-    console.log("[Slack Event Wrapper RAW EVENT RECEIVED]", JSON.stringify(event, null, 2));
 
     const eventId = body?.event_id || `no-id:${event.event_ts}`;
     if (await isDuplicateRedis(eventId)) {
