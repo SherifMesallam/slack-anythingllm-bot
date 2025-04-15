@@ -39,10 +39,8 @@ import {
  } from './services.js';
  import {
      createNewAnythingLLMThread, // Needed for issue analysis context
-     determineInitialWorkspace // Import the helper from messageHandler
- } from './llm.js'; // Assuming determineInitialWorkspace moved or copied to llm.js
-// If determineInitialWorkspace is still in messageHandler.js, adjust import:
-// import { determineInitialWorkspace } from './handlers/messageHandler.js';
+ } from './llm.js';
+ import { determineInitialWorkspace } from './handlers/messageHandler.js';
 
 
 // --- Express App Setup ---
