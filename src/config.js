@@ -1,3 +1,4 @@
+
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -23,15 +24,11 @@ export const workspaceMapping = JSON.parse(process.env.WORKSPACE_MAPPING || '{}'
 export const anythingLLMBaseUrl = process.env.LLM_API_BASE_URL;
 export const anythingLLMApiKey = process.env.LLM_API_KEY;
 
-// --- Routing/Intent Configuration ---
-export const routingLlmApiKey = process.env.ROUTING_LLM_API_KEY || null; // Gemini API Key
-export const routingLlmModelName = process.env.ROUTING_LLM_MODEL_NAME || "gemini-2.5-pro-preview-03-25"; // Model for routing
-
 // --- GitHub Feature Configuration ---
-export const githubToken = process.env.GITHUB_TOKEN || null; // Optional: Used for GitHub features (release check, PR, issue)
-export const githubWorkspaceSlug = process.env.GITHUB_WORKSPACE_SLUG || null; // AnythingLLM workspace for generating GitHub API calls
-export const formatterWorkspaceSlug = process.env.FORMATTER_WORKSPACE_SLUG || null; // AnythingLLM workspace for formatting GitHub responses
-export const GITHUB_OWNER = process.env.GITHUB_OWNER || 'gravityforms'; // Default GH owner
+export const githubToken = process.env.GITHUB_TOKEN || null; // REQUIRED for GitHub features (gh> commands, /gh-* commands)
+export const githubWorkspaceSlug = process.env.GITHUB_WORKSPACE_SLUG || null; // REQUIRED for generic 'gh> api' / '/gh-api' command
+export const formatterWorkspaceSlug = process.env.FORMATTER_WORKSPACE_SLUG || null; // Optional: For formatting 'gh> api' / '/gh-api' responses
+export const GITHUB_OWNER = process.env.GITHUB_OWNER || 'gravityforms'; // Default GH owner for commands unless specified otherwise
 
 // --- Infrastructure Configuration ---
 export const port = process.env.PORT || 3000;
@@ -42,7 +39,7 @@ export const databaseUrl = process.env.DATABASE_URL || null;
 export const MAX_SLACK_BLOCK_TEXT_LENGTH = 2950; // Slightly less than 3000 limit for safety
 export const MAX_SLACK_BLOCK_CODE_LENGTH = process.env.MAX_SLACK_BLOCK_CODE_LENGTH ? parseInt(process.env.MAX_SLACK_BLOCK_CODE_LENGTH) : 2800; // Max length for text in a code block element
 export const RESET_CONVERSATION_COMMAND = 'reset conversation';
-export const WORKSPACE_OVERRIDE_COMMAND_PREFIX = '#'; // Prefix to trigger manual workspace selection
+export const WORKSPACE_OVERRIDE_COMMAND_PREFIX = '#'; // Prefix to trigger manual workspace selection IN NORMAL CHAT
 export const MIN_SUBSTANTIVE_RESPONSE_LENGTH = process.env.MIN_SUBSTANTIVE_RESPONSE_LENGTH ? parseInt(process.env.MIN_SUBSTANTIVE_RESPONSE_LENGTH) : 100; // Minimum length for a response to be considered substantive enough for feedback buttons
 
 // --- Cache Configuration ---
@@ -70,24 +67,21 @@ export function validateConfig() {
     // Workspace configuration check
     if (!fallbackWorkspace && !enableUserWorkspaces && Object.keys(workspaceMapping).length === 0) {
         console.warn("⚠️ No primary workspace configuration found (FALLBACK_WORKSPACE_SLUG, WORKSPACE_MAPPING, or ENABLE_USER_WORKSPACES+SLACK_USER_WORKSPACE_MAPPING). Bot may struggle to find default destinations.");
-    }
-
-    // Optional checks
-    if (!enableUserWorkspaces && Object.keys(workspaceMapping).length === 0 && !fallbackWorkspace) {
-        // This duplicates the warning above slightly, but emphasizes lack of channel/default mapping
-        console.warn("⚠️ No channel/default WORKSPACE_MAPPING or FALLBACK_WORKSPACE_SLUG set. Bot might not know where to send non-user-specific messages.");
+    } else {
+         console.log("[Config] Found workspace config (User, Channel, or Fallback).")
     }
     if (enableUserWorkspaces && Object.keys(userWorkspaceMapping).length === 0) {
         console.warn("⚠️ ENABLE_USER_WORKSPACES is true, but SLACK_USER_WORKSPACE_MAPPING is empty or invalid JSON.");
     }
+
+    // Optional checks
     if (!redisUrl) console.warn("⚠️ REDIS_URL not set. Duplicate detection and history reset features disabled.");
     if (!databaseUrl) console.warn("⚠️ DATABASE_URL not set. Feedback storage disabled (will log to console).");
 
-    // Routing & GitHub Feature Checks
-    if (!routingLlmApiKey) console.warn("⚠️ ROUTING_LLM_API_KEY not set. Intent-based routing via Gemini disabled. Bot will rely on default LLM.");
-    if (!githubToken) console.warn("⚠️ GITHUB_TOKEN not set. GitHub features (release check, PR/Issue analysis, API calls) disabled.");
-    if (githubToken && !githubWorkspaceSlug) console.warn("⚠️ GITHUB_TOKEN is set, but GITHUB_WORKSPACE_SLUG is not. Generic GitHub API commands (#github, github ...) may fail.");
-    if (githubToken && !formatterWorkspaceSlug) console.warn("⚠️ GITHUB_TOKEN is set, but FORMATTER_WORKSPACE_SLUG is not. GitHub API responses will be sent as raw JSON.");
+    // GitHub Feature Checks (More critical now)
+    if (!githubToken) console.error("❌ GITHUB_TOKEN is not set. GitHub features (`gh>` commands, `/gh-*` commands) will be disabled.");
+    if (githubToken && !githubWorkspaceSlug) console.warn("⚠️ GITHUB_TOKEN is set, but GITHUB_WORKSPACE_SLUG is not. Generic GitHub API commands (`gh> api`, `/gh-api`) may fail.");
+    if (githubToken && !formatterWorkspaceSlug) console.warn("⚠️ GITHUB_TOKEN is set, but FORMATTER_WORKSPACE_SLUG is not. GitHub API (`gh> api`, `/gh-api`) responses will be sent as raw JSON.");
 
     console.log("[Config] Basic validation complete.");
 }
