@@ -16,7 +16,7 @@ import { validateConfig } from './config.js';
 validateConfig();
 
 // Import Services & Shutdown Logic
-import { shutdownServices, dbPool, storeFeedback, getAnythingLLMThreadMapping, storeAnythingLLMThreadMapping } from './services.js'; // Import DB helpers
+import { shutdownServices, dbPool, getAnythingLLMThreadMapping, storeAnythingLLMThreadMapping } from './services.js'; // Import DB helpers
 
 // Import Slack Clients & Handlers
 import { slackEvents, handleSlackEvent } from './slack.js'; // handleInteraction moved here
@@ -137,3 +137,35 @@ let appOctokitInstance = null;
 if (githubToken) { try { const { Octokit } = await import('@octokit/rest'); appOctokitInstance = new Octokit({ auth: githubToken }); console.log("[App] Octokit initialized."); } catch (error) { console.error("[App] Failed init Octokit:", error); } } else { console.warn("[App] Octokit not initialized (GITHUB_TOKEN missing)."); }
 
 console.log("Event listeners and interaction endpoint configured.");
+async function storeFeedback(feedbackData) {
+    if (!databaseUrl || !dbPool) {
+        console.warn("DATABASE_URL not configured, logging feedback to console only.");
+        console.log("--- FEEDBACK (Console Log) ---", JSON.stringify(feedbackData, null, 2));
+        return;
+    }
+    const insertQuery = `
+        INSERT INTO feedback (feedback_value, user_id, channel_id, bot_message_ts, original_user_message_ts, action_id, sphere_slug, bot_message_text, original_user_message_text)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id;`;
+    const values = [
+        feedbackData.feedback_value || null, feedbackData.user_id || null,
+        feedbackData.channel_id || null, feedbackData.bot_message_ts || null,
+        feedbackData.original_user_message_ts || null, feedbackData.action_id || null,
+        feedbackData.sphere_slug || null, feedbackData.bot_message_text || null,
+        feedbackData.original_user_message_text || null
+    ];
+    let client;
+    try {
+        client = await dbPool.connect();
+        console.log(`[Slack Service/Feedback] Inserting: User=${values[1]}, Val=${values[0]}, Sphere=${values[6]}`);
+        const result = await client.query(insertQuery, values);
+        if (result.rows?.[0]?.id) {
+             console.log(`[Slack Service/Feedback] Saved ID: ${result.rows[0].id}`);
+        } else {
+             console.warn('[Slack Service/Feedback] Insert OK, no ID.');
+        }
+    } catch (err) {
+        console.error('[Slack Service/Feedback DB Error]', err);
+    } finally {
+        if (client) client.release();
+    }
+}
