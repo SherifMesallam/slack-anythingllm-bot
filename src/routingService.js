@@ -29,7 +29,7 @@ Supported GitHub Actions & Keywords:
 1.  'fetch_release': Get latest release info. Keywords: "latest release", "version", "tag". Needs repo name.
 2.  'review_pr': Review a Pull Request. Keywords: "review pr", "look at pr", "analyze pr". Needs repo name & PR number. May have #workspace slug.
 3.  'analyze_issue': Analyze/summarize a GitHub Issue (usually repo 'backlog'). Keywords: "analyze issue", "summarize issue", "explain issue", "check issue". Needs issue number. May have user prompt.
-4.  'generic_github_api': A general request for GitHub info/action not matching above. Keywords: "github", "#github", "api call". Contains user prompt.
+4.  'generic_github_api': asking general questions about searching for issues, looking for a specific pr, a github project, it is something that could be done using the github API
 
 JSON Output Structure:
 {
