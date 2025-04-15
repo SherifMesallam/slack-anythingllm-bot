@@ -939,7 +939,14 @@ ${ prContext }`;
 
 			// 8. Construct LLM Input (Just the query)
 			let llmInputText = cleanedQuery; // Start with the base query
-
+			let threadHistory = "";
+			if (wasMentioned && threadTs) {
+				threadHistory = await fetchConversationHistory(channel, threadTs, originalTs, isDM);
+				console.log('[Slack Handler] Thread history fetched:', threadHistory ? 'Yes' : 'No');
+				if (threadHistory) {
+					cleanedQuery = `${threadHistory}\n\nLatest question: ${cleanedQuery}`;
+				}
+			}
 			// --- Add instruction for non-GitHub queries --- START
 			console.log( "[Slack Handler] This is NOT a GitHub command, adding LLM instructions." );
 			const instruction = '\n\nIMPORTANT: Please do not include context references (like "CONTEXT 0", "CONTEXT 1", etc.) in your response. Provide a clean, professional answer without these annotations.';
