@@ -17,7 +17,9 @@ import {
 } from '../config.js';
 import {
     getAnythingLLMThreadMapping,
-    storeAnythingLLMThreadMapping
+    storeAnythingLLMThreadMapping,
+    // dbPool, // Import if needed for feedback/other DB ops within this file
+    // storeFeedback // Import if needed
 } from '../services.js';
 import {
     getWorkspaces,
@@ -39,60 +41,63 @@ import {
 
 // --- Command Patterns using 'gh>' prefix ---
 const GH_COMMAND_PREFIX = "gh>"; // Define the prefix
-// Pattern for gh> release <repo_name_or_abbreviation_or_owner/repo>
 const RELEASE_REGEX = new RegExp(`^${GH_COMMAND_PREFIX}\\s+release\\s+(?<repo_id>[\\w.-]+(?:\\/[\\w.-]+)?)\\s*$`, 'i');
-// Pattern for gh> review pr <owner/repo>#<number> #<workspace>
 const PR_REVIEW_REGEX = new RegExp(`^${GH_COMMAND_PREFIX}\\s+review\\s+pr\\s+(?<owner>[\\w.-]+)\\/(?<repo>[\\w.-]+)#(?<pr_number>\\d+)\\s+#(?<workspace_slug>[\\w-]+)\\s*$`, 'i');
-// Pattern for gh> analyze issue [#<number>] | [<owner/repo>#<number>] [custom prompt...]
 const ISSUE_ANALYSIS_REGEX = new RegExp(`^${GH_COMMAND_PREFIX}\\s+(?:analyze|summarize|explain)\\s+issue\\s+(?:(?<owner>[\\w.-]+)\\/(?<repo>[\\w.-]+))?#(?<issue_number>\\d+)(?:\\s+(?<user_prompt>.+))?\\s*$`, 'i');
-// Pattern for gh> api <rest_of_query> (Generic fallback)
 const GENERIC_API_REGEX = new RegExp(`^${GH_COMMAND_PREFIX}\\s+api\\s+(?<api_query>.+)\\s*$`, 'i');
-// Pattern for manual workspace override (e.g., #workspace-slug)
 const WORKSPACE_OVERRIDE_REGEX = new RegExp(`\\${WORKSPACE_OVERRIDE_COMMAND_PREFIX}(\\S+)`);
 
 
+// --- Helper Function: Determine Initial Workspace ---
 /**
- * Determines the appropriate AnythingLLM workspace slug based on config priority.
+ * Determines the appropriate AnythingLLM workspace slug based on config priority
+ * for creating a *new* thread.
  * Priority: User Mapping > Channel Mapping > Fallback Workspace
  * @param {string} userId - Slack User ID
  * @param {string} channelId - Slack Channel ID
- * @returns {string | null} The determined workspace slug or null if none found.
+ * @returns {string | null} The determined workspace slug or null if none found/configured.
  */
 function determineInitialWorkspace(userId, channelId) {
-    let targetWorkspace = null;
+    let targetWorkspace = null; // Start with null
 
-    // 1. Check User Workspace Mapping (if enabled)
-    if (enableUserWorkspaces && userWorkspaceMapping[userId]) {
-        targetWorkspace = userWorkspaceMapping[userId];
-        console.log(`[Workspace Logic] Found user mapping for ${userId}: ${targetWorkspace}`);
-    }
-
-    // 2. Check Channel Workspace Mapping (if no user mapping found)
-    if (!targetWorkspace && workspaceMapping[channelId]) {
-        targetWorkspace = workspaceMapping[channelId];
-        console.log(`[Workspace Logic] Found channel mapping for ${channelId}: ${targetWorkspace}`);
-    }
-
-    // 3. Use Fallback Workspace (if no user or channel mapping found)
-    if (!targetWorkspace) {
-        targetWorkspace = fallbackWorkspace;
-        if (targetWorkspace) {
-            console.log(`[Workspace Logic] No user/channel mapping found. Using fallback: ${targetWorkspace}`);
-        } else {
-            console.warn(`[Workspace Logic] No user, channel, or fallback workspace configured! Cannot determine target.`);
+    // 1. User Mapping (Only if enabled)
+    if (enableUserWorkspaces && userWorkspaceMapping && typeof userWorkspaceMapping === 'object') {
+        const userMappedWorkspace = userWorkspaceMapping[userId];
+        if (typeof userMappedWorkspace === 'string' && userMappedWorkspace.trim()) {
+            targetWorkspace = userMappedWorkspace.trim();
+            console.log(`[Workspace Logic] User mapping found for ${userId}: ${targetWorkspace}`);
+        } else if (userMappedWorkspace) {
+             console.warn(`[Workspace Logic] Invalid workspace value found in user mapping for ${userId}: "${userMappedWorkspace}". Ignoring.`);
         }
     }
-    // Ensure the target workspace actually exists (best effort check against cached list)
-    // This is optional but prevents errors later if config is stale.
-    // Note: getWorkspaces() needs to be efficient (cached) if used here frequently.
-    // const availableWorkspaces = await getWorkspaces(); // Consider caching implication
-    // if (targetWorkspace && !availableWorkspaces.includes(targetWorkspace)) {
-    //     console.warn(`[Workspace Logic] Determined workspace "${targetWorkspace}" but it's not in the list of available workspaces. Check config/LLM.`);
-    //     // Optionally fall back further or return null
-    // }
 
+    // 2. Channel Mapping (only if user mapping didn't apply or was invalid)
+    if (!targetWorkspace && workspaceMapping && typeof workspaceMapping === 'object') {
+        const channelMappedWorkspace = workspaceMapping[channelId];
+         if (typeof channelMappedWorkspace === 'string' && channelMappedWorkspace.trim()) {
+            targetWorkspace = channelMappedWorkspace.trim();
+            console.log(`[Workspace Logic] Channel mapping found for ${channelId}: ${targetWorkspace}`);
+        } else if (channelMappedWorkspace){
+             console.warn(`[Workspace Logic] Invalid workspace value found in channel mapping for ${channelId}: "${channelMappedWorkspace}". Ignoring.`);
+        }
+    }
+
+    // 3. Fallback Workspace (only if neither user nor channel mapping applied)
+    if (!targetWorkspace) {
+        if (typeof fallbackWorkspace === 'string' && fallbackWorkspace.trim()) {
+            targetWorkspace = fallbackWorkspace.trim();
+            console.log(`[Workspace Logic] Using fallback workspace: ${targetWorkspace}`);
+        } else {
+             console.warn(`[Workspace Logic] No user/channel mapping found and fallback workspace is not configured or invalid.`);
+             // targetWorkspace remains null
+        }
+    }
+
+    // 4. Return the result (could be null)
+    console.log(`[Workspace Logic] Final determined initial workspace: ${targetWorkspace}`);
     return targetWorkspace;
 }
+// --- End Helper Function ---
 
 
 /**
@@ -149,7 +154,7 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
         if (!githubToken) {
              console.warn("[Message Handler] GitHub command detected, but GITHUB_TOKEN is not configured.");
              thinkingMessagePromise.then(ts => { if(ts) slack.chat.update({ channel: channelId, ts, text: `❌ GitHub commands are disabled (missing configuration).` }).catch(()=>{}); });
-             return;
+             return; // Stop processing this command
         }
 
         let match; // Reuse variable for matches
@@ -183,9 +188,17 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
                  if (!isNaN(issueNum)) {
                     let anythingLLMThreadSlug = null; let workspaceSlugForThread = null;
                     try {
+                        // Determine thread context (needed for LLM calls within the handler)
                         const mapping = await getAnythingLLMThreadMapping(channelId, replyTarget);
-                        if (mapping) { [anythingLLMThreadSlug, workspaceSlugForThread] = [mapping.anythingllm_thread_slug, mapping.anythingllm_workspace_slug]; }
-                        else { workspaceSlugForThread = determineInitialWorkspace(userId, channelId) || 'all'; anythingLLMThreadSlug = await createNewAnythingLLMThread(workspaceSlugForThread); if (!anythingLLMThreadSlug) throw new Error(`Failed create thread in ${workspaceSlugForThread}.`); await storeAnythingLLMThreadMapping(channelId, replyTarget, workspaceSlugForThread, anythingLLMThreadSlug); }
+                        if (mapping) {
+                            [anythingLLMThreadSlug, workspaceSlugForThread] = [mapping.anythingllm_thread_slug, mapping.anythingllm_workspace_slug];
+                        } else {
+                            workspaceSlugForThread = determineInitialWorkspace(userId, channelId); // Use HELPER
+                            if (!workspaceSlugForThread) throw new Error("No workspace found for new thread (check config).");
+                            anythingLLMThreadSlug = await createNewAnythingLLMThread(workspaceSlugForThread);
+                            if (!anythingLLMThreadSlug) throw new Error(`Failed create thread in ${workspaceSlugForThread}.`);
+                            await storeAnythingLLMThreadMapping(channelId, replyTarget, workspaceSlugForThread, anythingLLMThreadSlug);
+                        }
                         console.log(`[Message Handler - Issue Cmd] Using thread: ${workspaceSlugForThread}:${anythingLLMThreadSlug}`);
                         commandHandled = await handleIssueAnalysisCommand( owner, repo, issueNum, user_prompt || null, replyTarget, channelId, slack, appOctokitInstance, thinkingMessagePromise, workspaceSlugForThread, anythingLLMThreadSlug );
                      } catch (threadError) { console.error("[MH-IssueCmd] Error getting/creating thread:", threadError); thinkingMessagePromise.then(ts => { if(ts) slack.chat.update({ channel: channelId, ts, text: `❌ Error setting up context: ${threadError.message}` }).catch(()=>{}); }); commandHandled = true; }
@@ -220,39 +233,38 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
         let workspaceSlugForThread = null;
          try {
              const existingMapping = await getAnythingLLMThreadMapping(channelId, replyTarget);
-             if (existingMapping) {
+             if (existingMapping) { // Existing Thread Found
                  anythingLLMThreadSlug = existingMapping.anythingllm_thread_slug;
                  workspaceSlugForThread = existingMapping.anythingllm_workspace_slug;
                  console.log(`[Message Handler - Fallback] Found existing thread: ${workspaceSlugForThread}:${anythingLLMThreadSlug}`);
 
-                 // Check for manual override even on existing threads
+                 // Check for manual workspace override (#workspace-slug) on existing threads
                  const overrideMatch = cleanedQuery.match(WORKSPACE_OVERRIDE_REGEX);
                  if (overrideMatch && overrideMatch[1]) {
                      const potentialWorkspace = overrideMatch[1];
                      const availableWorkspaces = await getWorkspaces(); // Needs cache
                      if (availableWorkspaces.includes(potentialWorkspace)) {
-                         workspaceSlugForThread = potentialWorkspace; // Override the workspace for this call
+                         workspaceSlugForThread = potentialWorkspace; // Override workspace for THIS CALL ONLY
                          console.log(`[Message Handler - Fallback] Manual workspace override on existing thread: "${workspaceSlugForThread}".`);
-                         // Note: We are NOT updating the stored mapping here, only overriding for this query.
                      } else {
-                         console.warn(`[Message Handler - Fallback] Override '${potentialWorkspace}' not available. Using mapped: '${workspaceSlugForThread}'.`);
+                         console.warn(`[Message Handler - Fallback] Override '#${potentialWorkspace}' not available. Using mapped: '${workspaceSlugForThread}'.`);
                      }
                  }
 
-             } else {
+             } else { // No Existing Thread Found
                  console.log(`[Message Handler - Fallback] No existing thread. Determining initial sphere...`);
-                 let initialSphere = determineInitialWorkspace(userId, channelId); // Use the helper function
+                 let initialSphere = determineInitialWorkspace(userId, channelId); // Use the HELPER function
 
-                 // Check for manual override for *new* threads
+                 // Check for manual workspace override (#workspace-slug) for NEW threads
                  const overrideMatch = cleanedQuery.match(WORKSPACE_OVERRIDE_REGEX);
                  if (overrideMatch && overrideMatch[1]) {
                       const potentialWorkspace = overrideMatch[1];
                       const availableWorkspaces = await getWorkspaces(); // Needs cache
                       if (availableWorkspaces.includes(potentialWorkspace)) {
-                          initialSphere = potentialWorkspace; // Override the default
+                          initialSphere = potentialWorkspace; // Override the determined default
                           console.log(`[Message Handler - Fallback] Manual workspace override for NEW thread: "${initialSphere}".`);
                       } else {
-                          console.warn(`[Message Handler - Fallback] Override '${potentialWorkspace}' not available. Using determined default: '${initialSphere}'.`);
+                          console.warn(`[Message Handler - Fallback] Override '#${potentialWorkspace}' not available. Using determined default: '${initialSphere}'.`);
                       }
                  }
 
@@ -281,19 +293,21 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
             let currentThinkingTs = messageTs;
             if (currentThinkingTs) { /* ... Update thinking message randomly ... */
                 try {
-                    const thinkingMessages = [":brain: Thinking...", ":gear: Processing...", ":mag: Analyzing...", ":nerd_face: Consulting knowledge base...", ":robot_face: Compiling response...", ":zap: Working on it..."];
+                    const thinkingMessages = [":brain: Thinking...", ":gear: Processing...", ":mag: Analyzing...", ":nerd_face: Consulting...", ":robot_face: Compiling...", ":zap: Working..."];
                     await slack.chat.update({ channel: channelId, ts: currentThinkingTs, text: thinkingMessages[Math.floor(Math.random() * thinkingMessages.length)] });
                 } catch (updateError) { console.warn(`[MH-Fallback] Failed update thinking msg:`, updateError.data?.error); currentThinkingTs = null; }
             }
 
             // Construct LLM Input (using cleanedQuery)
             let llmInputText = cleanedQuery;
+            // Remove override command from text sent to LLM if present
+            llmInputText = llmInputText.replace(WORKSPACE_OVERRIDE_REGEX, '').trim();
             const instruction = '\n\nIMPORTANT: Please do not include context references (like "CONTEXT 0", "CONTEXT 1", etc.) in your response. Provide a clean, professional answer without these annotations, Please do not confirm that you understand my request, just understand it.';
             llmInputText += instruction;
 
             console.log(`[Message Handler - Fallback] Sending query to AnythingLLM Thread ${workspaceSlugForThread}:${anythingLLMThreadSlug}...`);
             const llmStartTime = Date.now();
-            const rawReply = await queryLlm(workspaceSlugForThread, anythingLLMThreadSlug, llmInputText); // Use determined slugs
+            const rawReply = await queryLlm(workspaceSlugForThread, anythingLLMThreadSlug, llmInputText);
             console.log(`[Message Handler - Fallback] LLM call duration: ${Date.now() - llmStartTime}ms`);
             if (!rawReply) throw new Error('LLM returned empty response.');
 
@@ -313,25 +327,15 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
             for (let i = 0; i < segments.length; i++) {
                 const segment = segments[i];
                 let blocksToSend = [];
-                let fallbackText = '...'; // Default fallback
+                let fallbackText = '...';
 
                 if (segment.type === 'text' && segment.content?.trim()) {
                     const richTextBlock = markdownToRichTextBlock(segment.content, `msg_${Date.now()}_${i}`);
-                    if (richTextBlock) {
-                        blocksToSend.push(richTextBlock);
-                        fallbackText = segment.content.substring(0, 200);
-                    } else { console.warn("[MH-Fallback] Failed create text block."); continue; }
+                    if (richTextBlock) { blocksToSend.push(richTextBlock); fallbackText = segment.content.substring(0, 200); } else { continue; }
                 } else if (segment.type === 'code' && segment.content?.trim()) {
-                    const language = segment.language || 'text';
-                    const inlineCodeContent = `\`\`\`${language}\n${segment.content}\`\`\``;
-                    const richTextBlock = markdownToRichTextBlock(inlineCodeContent, `code_${Date.now()}_${i}`);
-                    if (richTextBlock) {
-                        blocksToSend.push(richTextBlock);
-                        fallbackText = `Code Snippet (${language})`;
-                    } else { console.warn("[MH-Fallback] Failed create code block."); continue; }
-                } else {
-                    continue; // Skip empty segments
-                }
+                    const language = segment.language || 'text'; const inlineCodeContent = `\`\`\`${language}\n${segment.content}\`\`\``; const richTextBlock = markdownToRichTextBlock(inlineCodeContent, `code_${Date.now()}_${i}`);
+                    if (richTextBlock) { blocksToSend.push(richTextBlock); fallbackText = `Code Snippet (${language})`; } else { continue; }
+                } else { continue; } // Skip empty
 
                 if (blocksToSend.length === 0) continue;
 
@@ -339,16 +343,17 @@ async function handleSlackMessageEventInternal(event, slack, appOctokitInstance)
                     const postResult = await slack.chat.postMessage({ channel: channelId, thread_ts: replyTarget, text: fallbackText, blocks: blocksToSend });
                     lastMessageTs = postResult?.ts;
                     console.log(`[MH-Fallback] Posted segment ${i + 1}/${segments.length} (ts: ${lastMessageTs}).`);
-                } catch (postError) { console.error(`[MH-Fallback] Error posting segment ${i + 1}:`, postError.data?.error); /* Handle error, maybe post raw */ }
-                if (segments.length > 1 && i < segments.length - 1) await new Promise(r => setTimeout(r, 500)); // Delay
+                } catch (postError) { console.error(`[MH-Fallback] Error posting segment ${i + 1}:`, postError.data?.error); await slack.chat.postMessage({ channel: channelId, thread_ts: replyTarget, text: `⚠️ Error displaying part of response.`}).catch(() => {}); }
+                if (segments.length > 1 && i < segments.length - 1) await new Promise(r => setTimeout(r, 500));
             } // End segment loop
 
             // Post feedback buttons if applicable
             if (lastMessageTs && isSubstantiveResponse) {
                 try {
                     const feedbackButtonElements = [ { type: "button", text: { type: "plain_text", text: "👎", emoji: true }, style: "danger", value: "bad", action_id: "feedback_bad" }, { type: "button", text: { type: "plain_text", text: "👌", emoji: true }, value: "ok", action_id: "feedback_ok" }, { type: "button", text: { type: "plain_text", text: "👍", emoji: true }, style: "primary", value: "great", action_id: "feedback_great" }];
-                    const finalFeedbackBlock = [ { type: "divider" }, { type: "actions", block_id: `feedback_${originalTs}_${workspaceSlugForThread}`, elements: feedbackButtonElements }]; // Use correct workspace slug
+                    const finalFeedbackBlock = [ { type: "divider" }, { type: "actions", block_id: `feedback_${originalTs}_${workspaceSlugForThread}`, elements: feedbackButtonElements }];
                     await slack.chat.postMessage({ channel: channelId, thread_ts: replyTarget, text: "Feedback:", blocks: finalFeedbackBlock });
+                    console.log(`[MH-Fallback] Posted feedback buttons.`);
                 } catch (feedbackPostError) { console.warn("[MH-Fallback] Failed post feedback buttons:", feedbackPostError.data?.error); }
             }
             // --- End response processing ---

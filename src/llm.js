@@ -1,10 +1,16 @@
+
 import axios from 'axios';
 import {
     anythingLLMBaseUrl,
     anythingLLMApiKey,
     WORKSPACE_LIST_CACHE_KEY,
     WORKSPACE_LIST_CACHE_TTL,
-    redisUrl
+    redisUrl,
+    // Import config needed for determineInitialWorkspace
+    enableUserWorkspaces,
+    userWorkspaceMapping,
+    workspaceMapping,
+    fallbackWorkspace
 } from './config.js';
 import { redisClient, isRedisReady } from './services.js';
 
@@ -44,7 +50,7 @@ async function getAvailableSphereSlugs() {
     try {
         const response = await axios.get(`${anythingLLMBaseUrl}/api/v1/workspaces`, {
             headers: { 'Accept': 'application/json', Authorization: `Bearer ${anythingLLMApiKey}` },
-            timeout: 10000,
+            timeout: 10000, // 10 seconds timeout
         });
 
         if (response.data && Array.isArray(response.data.workspaces)) {
@@ -71,32 +77,84 @@ async function getAvailableSphereSlugs() {
     }
 
     // Fallback if all attempts fail
-    console.warn("[LLM Service/getSlugs] Failed to get slugs from all sources. Falling back to ['all'].");
-    return ['all']; // Default to 'all' if API fails
+    console.warn("[LLM Service/getSlugs] Failed to get slugs from all sources. Returning empty list.");
+    return []; // Return empty list on failure
 }
 
-// --- Sphere Decision Logic (REMOVED - Sphere decision now happens in slack.js before creating/fetching thread) ---
-// export async function decideSphere(userQuestion, conversationHistory = "") { ... }
 
-// +++ NEW: Function to Create a New AnythingLLM Thread +++
+// --- Helper Function: Determine Initial Workspace ---
+/**
+ * Determines the appropriate AnythingLLM workspace slug based on config priority
+ * for creating a *new* thread.
+ * Priority: User Mapping > Channel Mapping > Fallback Workspace
+ * @param {string} userId - Slack User ID
+ * @param {string} channelId - Slack Channel ID
+ * @returns {string | null} The determined workspace slug or null if none found/configured.
+ */
+export function determineInitialWorkspace(userId, channelId) {
+    let targetWorkspace = null;
+
+    // 1. User Mapping (Only if enabled)
+    if (enableUserWorkspaces && userWorkspaceMapping && typeof userWorkspaceMapping === 'object') {
+        const userMappedWorkspace = userWorkspaceMapping[userId];
+        if (typeof userMappedWorkspace === 'string' && userMappedWorkspace.trim()) {
+            targetWorkspace = userMappedWorkspace.trim();
+            console.log(`[Workspace Logic] User mapping found for ${userId}: ${targetWorkspace}`);
+        } else if (userMappedWorkspace) {
+             console.warn(`[Workspace Logic] Invalid workspace value in user mapping for ${userId}: "${userMappedWorkspace}". Ignoring.`);
+        }
+    }
+
+    // 2. Channel Mapping (only if user mapping didn't apply or was invalid)
+    if (!targetWorkspace && workspaceMapping && typeof workspaceMapping === 'object') {
+        const channelMappedWorkspace = workspaceMapping[channelId];
+         if (typeof channelMappedWorkspace === 'string' && channelMappedWorkspace.trim()) {
+            targetWorkspace = channelMappedWorkspace.trim();
+            console.log(`[Workspace Logic] Channel mapping found for ${channelId}: ${targetWorkspace}`);
+        } else if (channelMappedWorkspace){
+             console.warn(`[Workspace Logic] Invalid workspace value in channel mapping for ${channelId}: "${channelMappedWorkspace}". Ignoring.`);
+        }
+    }
+
+    // 3. Fallback Workspace (only if neither user nor channel mapping applied)
+    if (!targetWorkspace) {
+        if (typeof fallbackWorkspace === 'string' && fallbackWorkspace.trim()) {
+            targetWorkspace = fallbackWorkspace.trim();
+            console.log(`[Workspace Logic] Using fallback workspace: ${targetWorkspace}`);
+        } else {
+             console.warn(`[Workspace Logic] No user/channel mapping found and fallback workspace is not configured or invalid.`);
+        }
+    }
+
+    console.log(`[Workspace Logic] Final determined initial workspace: ${targetWorkspace}`);
+    return targetWorkspace;
+}
+// --- End Helper Function ---
+
+
+// +++ Function to Create a New AnythingLLM Thread +++
 /**
  * Creates a new thread in a specific AnythingLLM workspace.
  * @param {string} sphere - The workspace slug.
  * @returns {Promise<string | null>} The new thread slug, or null on error.
  */
 export async function createNewAnythingLLMThread(sphere) {
+    if (!sphere) {
+        console.error("[LLM Service/createThread] Cannot create thread without a workspace slug.");
+        return null;
+    }
     console.log(`[LLM Service/createThread] Creating new thread in sphere: ${sphere}...`);
     try {
         const response = await axios.post(`${anythingLLMBaseUrl}/api/v1/workspace/${sphere}/thread/new`,
-            {}, // No body needed for thread creation
+            {}, // No body needed
             {
                 headers: { Authorization: `Bearer ${anythingLLMApiKey}` },
-                timeout: 15000, // 15s timeout for thread creation
+                timeout: 15000, // 15s timeout
             });
 
-        if (response.data && response.data.thread && response.data.thread.slug) {
+        if (response.data?.thread?.slug) {
             const newThreadSlug = response.data.thread.slug;
-            console.log(`[LLM Service/createThread] Successfully created thread with slug: ${newThreadSlug}`);
+            console.log(`[LLM Service/createThread] Successfully created thread slug: ${newThreadSlug}`);
             return newThreadSlug;
         } else {
             console.error('[LLM Service/createThread] Unexpected API response structure:', response.data);
@@ -108,14 +166,19 @@ export async function createNewAnythingLLMThread(sphere) {
     }
 }
 
-// --- Main LLM Chat Function (MODIFIED to handle both workspace and thread chats) ---
+// --- Main LLM Chat Function (Handles workspace and thread chats) ---
 export async function queryLlm(sphere, anythingLLMThreadSlug, inputText, mode = 'chat', attachments = []) {
-    console.log(`[LLM Service/queryLlm] Querying sphere: ${sphere}, thread: ${anythingLLMThreadSlug}, mode: ${mode}`);
+    console.log(`[LLM Service/queryLlm] Querying sphere: ${sphere}, thread: ${anythingLLMThreadSlug || 'None'}, mode: ${mode}`);
 
     if (!sphere) {
-        console.error('[LLM Service/queryLlm] Error: sphere (workspace slug) is required but was not provided.');
-        throw new Error('Internal error: Missing workspace slug.');
+        console.error('[LLM Service/queryLlm] Error: sphere (workspace slug) is required.');
+        throw new Error('Internal error: Missing workspace slug for LLM query.');
     }
+     if (!inputText || typeof inputText !== 'string' || !inputText.trim()) {
+        console.error('[LLM Service/queryLlm] Error: inputText is required and must be a non-empty string.');
+        throw new Error('Internal error: Missing input text for LLM query.');
+    }
+
 
     // Construct the endpoint URL based on whether a thread slug is provided
     const endpointUrl = anythingLLMThreadSlug
@@ -125,62 +188,56 @@ export async function queryLlm(sphere, anythingLLMThreadSlug, inputText, mode = 
     console.log(`[LLM Service/queryLlm] Using endpoint: ${endpointUrl}`);
 
     const requestBody = {
-        message: inputText, // Use original inputText
-        mode: mode, // Use the provided mode ('chat' or 'query')
-        // attachments: attachments // Add attachments if needed later
+        message: inputText,
+        mode: mode, // 'chat' or 'query'
+        // attachments: attachments // Add attachments later if needed
     };
-
-    // Log body carefully, remove attachments if sensitive
-   // console.log("[LLM Service/queryLlm] Request Body:", JSON.stringify({ ...requestBody, attachments: attachments.length > 0 ? `[${attachments.length} attachment(s)]` : '[]' }, null, 2));
+     // console.log("[LLM Service/queryLlm] Request Body:", JSON.stringify(requestBody)); // Verbose logging if needed
 
     try {
         const llmResponse = await axios.post(
             endpointUrl,
             requestBody,
             {
-                headers: { Authorization: `Bearer ${anythingLLMApiKey}` },
+                headers: { Authorization: `Bearer ${anythingLLMApiKey}`, 'Content-Type': 'application/json' },
                 timeout: 90000, // 90s timeout
             }
         );
 
-        // Check the response structure
-        if (!llmResponse || !llmResponse.data) {
+        if (!llmResponse?.data) {
             console.error('[LLM Service/queryLlm] Error: Empty or invalid response from LLM API');
             throw new Error('LLM API returned an empty or invalid response.');
         }
 
-        // Log the raw response for debugging
-        console.log("[LLM Service/queryLlm] Raw API Response:", JSON.stringify(llmResponse.data, null, 2));
+        // Log raw response structure for debugging if needed
+        // console.log("[LLM Service/queryLlm] Raw API Response Data:", llmResponse.data);
 
-        if (!llmResponse.data.textResponse) {
-            console.warn('[LLM Service/queryLlm] Warning: No textResponse field found in response', llmResponse.data);
-            return null;
+        if (llmResponse.data.textResponse === undefined || llmResponse.data.textResponse === null) {
+            console.warn('[LLM Service/queryLlm] Warning: No textResponse field in LLM response.', llmResponse.data);
+            // Decide how to handle this - return empty string, null, or throw?
+            // Returning empty string might be safer for downstream processing.
+            return "";
         }
+        // Return the text content
         return llmResponse.data.textResponse;
 
     } catch (error) {
-        // Enhanced Error Logging
         let errorDetails = error.message;
         if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
             console.error(`[LLM Error Data - ${error.response.status}]:`, error.response.data);
             errorDetails = `Status ${error.response.status}: ${JSON.stringify(error.response.data)}`;
         } else if (error.request) {
-            // The request was made but no response was received
-            console.error('[LLM Error Request]:', error.request);
+            console.error('[LLM Error Request]: Request made but no response received.');
             errorDetails = 'No response received from LLM server.';
-        } else {
-            // Something happened in setting up the request that triggered an Error
-            console.error('[LLM Error Message]:', error.message);
-        }
-        console.error('[LLM Error Config]:', error.config); // Log request config
+        } else { console.error('[LLM Error Message]:', error.message); }
+        console.error('[LLM Error Config]:', error.config);
 
         const errorMsg = `LLM query failed for sphere ${sphere}${anythingLLMThreadSlug ? ", thread "+anythingLLMThreadSlug : ''}: ${errorDetails}`;
-        console.error(`[LLM Error Full Context]`, errorMsg); // Log the final constructed message
+        console.error(`[LLM Error Full Context]`, errorMsg);
         throw new Error(errorMsg); // Rethrow with more context
     }
 }
 
 // --- Function to get available workspaces (exposed) ---
 export const getWorkspaces = getAvailableSphereSlugs;
+
