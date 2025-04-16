@@ -49,8 +49,6 @@ export const geminiApiKey = process.env.GEMINI_API_KEY || null; // API key for G
 export const githubIssueAnalysisWorkspaceSlug = process.env.GITHUB_ISSUE_ANALYSIS_WORKSPACE_SLUG || null;
 export const githubPrReviewWorkspaceSlug = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || null;
 export const feedbackEnabled = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || false;
-
-export const botUserId = process.env.SLACK_BOT_USER_ID || '';
 // List of all possible intents the bot might detect
 export const possibleIntents = [
   'general_query',          // Default fallback for general questions
