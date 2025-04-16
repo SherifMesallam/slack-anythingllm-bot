@@ -356,6 +356,8 @@ export async function handleGithubPrefixedCommand(commandArgs, { channelId, repl
 
     const args = commandArgs.split(/\s+/);
     const subCommand = args[0]?.toLowerCase();
+    // Extract arguments AFTER the subcommand name
+    const handlerArgs = args.slice(1).join(' '); 
 
     try {
         switch (subCommand) {
@@ -492,17 +494,20 @@ export async function handleGithubPrefixedCommand(commandArgs, { channelId, repl
             }
 
             case 'api': // Handle gh-api
-                handleGithubApiCommand(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                // Pass handlerArgs instead of full commandArgs
+                handleGithubApiCommand(handlerArgs, { channelId, replyTarget, slackWebClient, userId })
                     .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub API command handler via prefix'));
                 break;
 
             case 'review-pr':
-                handleGithubPrReview(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                // Pass handlerArgs instead of full commandArgs
+                handleGithubPrReview(handlerArgs, { channelId, replyTarget, slackWebClient, userId })
                     .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub PR review handler via prefix'));
                 break;
 
             case 'analyze-issue':
-                 handleGithubIssueAnalysis(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                 // Pass handlerArgs instead of full commandArgs
+                 handleGithubIssueAnalysis(handlerArgs, { channelId, replyTarget, slackWebClient, userId })
                     .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub issue analysis handler via prefix'));
                 break;
 
