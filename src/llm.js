@@ -7,6 +7,7 @@ import {
     redisUrl
 } from './config.js';
 import { redisClient, isRedisReady } from './services.js';
+import { logger } from './logger.js';
 
 // Cache for available workspace slugs
 let availableWorkspacesCache = null;
@@ -46,6 +47,9 @@ async function getAvailableSphereSlugs() {
             headers: { 'Accept': 'application/json', Authorization: `Bearer ${anythingLLMApiKey}` },
             timeout: 10000,
         });
+
+        // Added logging: Log the raw response data
+        logger.debug({ responseData: response.data }, 'Raw response from /api/v1/workspaces');
 
         if (response.data && Array.isArray(response.data.workspaces)) {
             const slugs = response.data.workspaces
