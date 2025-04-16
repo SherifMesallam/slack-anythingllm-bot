@@ -107,10 +107,33 @@ function verifySlackSignature(secret, timestamp, requestBody, signatureHeader) {
 // --- Express App Setup ---
 const app = express();
 
+// --- Conditional Body Parsing Middleware ---
+// Apply raw body parsing for /slack/events and urlencoded (with verify) for /slack/interactions
+app.use((req, res, next) => {
+    if (req.originalUrl === '/slack/events') {
+        express.raw({ type: 'application/json', limit: '10mb' })(req, res, next);
+    } else if (req.originalUrl === '/slack/interactions') {
+        express.urlencoded({
+            extended: true,
+            limit: '10mb',
+            verify: (req, res, buf, encoding) => {
+                // Store the raw buffer string on the request object
+                if (buf && buf.length) {
+                    logger.debug({ length: buf.length, encoding }, 'Raw body captured by express.urlencoded verify function');
+                    req.rawBodyString = buf.toString(encoding || 'utf8');
+                } else {
+                    logger.warn('express.urlencoded verify function received empty or no buffer');
+                }
+            }
+        })(req, res, next);
+    } else {
+        next(); // Continue for other routes
+    }
+});
+
 // --- Slack Event Handling ---
-// Verify requests from Slack using signing secret
-// Middleware uses express.raw to get the raw body needed for verification
-app.use('/slack/events', express.raw({ type: 'application/json' }), async (req, res, next) => {
+// Changed from app.use to app.post, removed inline express.raw
+app.post('/slack/events', async (req, res, next) => {
     // Added logging: Log entry and headers
     logger.info({
         method: req.method,
@@ -125,11 +148,10 @@ app.use('/slack/events', express.raw({ type: 'application/json' }), async (req, 
     const timestamp = req.headers['x-slack-request-timestamp'];
     const signature = req.headers['x-slack-signature'];
 
-    // Ensure rawBody is available (added by express.raw middleware)
     // Added logging: Check rawBody before verification
     logger.debug({ hasRawBody: !!req.rawBody, rawBodyType: typeof req.rawBody, rawBodyLength: req.rawBody?.length }, 'Checking req.rawBody before event signature verification');
     if (!req.rawBody) {
-        logger.error('Raw body missing from request. Ensure express.raw() middleware is configured correctly.');
+        logger.error('Raw body missing from request. Ensure raw body parsing middleware ran correctly.'); // Updated error message
         return res.status(500).send('Internal Server Error');
     }
     const rawBodyString = req.rawBody.toString();
@@ -220,18 +242,8 @@ app.use('/slack/events', express.raw({ type: 'application/json' }), async (req, 
 
 
 // --- Interaction Endpoint ---
-// Use express.urlencoded with verify option to capture raw body for signature check
-app.post('/slack/interactions', express.urlencoded({ extended: true, verify: (req, res, buf, encoding) => {
-    // Store the raw buffer string on the request object
-    if (buf && buf.length) {
-        // Added logging: Log when raw body is captured by verify
-        logger.debug({ length: buf.length, encoding }, 'Raw body captured by express.urlencoded verify function');
-        req.rawBodyString = buf.toString(encoding || 'utf8');
-    } else {
-        // Added logging: Log if verify function receives no buffer
-        logger.warn('express.urlencoded verify function received empty or no buffer');
-    }
-}}), async (req, res) => {
+// Removed inline express.urlencoded
+app.post('/slack/interactions', async (req, res) => {
 
     // Added logging: Log entry and headers for interactions
     logger.info({
@@ -244,15 +256,6 @@ app.post('/slack/interactions', express.urlencoded({ extended: true, verify: (re
         }
     }, 'Entering /slack/interactions handler');
 
-    // --- Verify Signature --- Start
-    const timestamp = req.headers['x-slack-request-timestamp'];
-    const signature = req.headers['x-slack-signature'];
-
-    if (!timestamp || !signature) {
-        logger.warn('Interaction request missing Slack timestamp or signature headers');
-        return res.status(400).send('Missing signature headers');
-    }
-
     // Added logging: Check rawBodyString before verification
     logger.debug({ hasRawBodyString: !!req.rawBodyString, rawBodyStringType: typeof req.rawBodyString, rawBodyStringLength: req.rawBodyString?.length }, 'Checking req.rawBodyString before interaction signature verification');
     if (!req.rawBodyString) {
@@ -260,13 +263,12 @@ app.post('/slack/interactions', express.urlencoded({ extended: true, verify: (re
         return res.status(500).send('Internal Server Error');
     }
 
-    const isVerified = verifySlackSignature(signingSecret, timestamp, req.rawBodyString, signature);
+    const isVerified = verifySlackSignature(signingSecret, req.headers['x-slack-request-timestamp'], req.rawBodyString, req.headers['x-slack-signature']);
 
     if (!isVerified) {
        logger.warn('Interaction signature verification failed!');
        return res.status(403).send('Signature verification failed');
     }
-    // --- Verify Signature --- End
 
     // Signature is verified, now process the payload (which is already parsed by urlencoded)
     let payload;

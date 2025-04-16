@@ -32,7 +32,7 @@ export const githubWorkspaceSlug = process.env.GITHUB_WORKSPACE_SLUG || null;
 export const formatterWorkspaceSlug = process.env.FORMATTER_WORKSPACE_SLUG || null; // Added formatter slug
 
 // --- Bot Behavior Configuration ---
-export const logLevel = process.env.LOG_LEVEL || 'info'; // Default log level
+export const logLevel = process.env.LOG_LEVEL || 'debug'; // Default log level
 export const MAX_SLACK_BLOCK_TEXT_LENGTH = 2950; // Slightly less than 3000 limit for safety
 export const MAX_SLACK_BLOCK_CODE_LENGTH = process.env.MAX_SLACK_BLOCK_CODE_LENGTH ? parseInt(process.env.MAX_SLACK_BLOCK_CODE_LENGTH) : 2800; // Max length for text in a code block element
 export const RESET_CONVERSATION_COMMAND = 'reset conversation';
