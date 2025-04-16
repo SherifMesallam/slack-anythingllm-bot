@@ -1,35 +1,18 @@
-# Advanced Slack AI Assistant Bot
+# Orbit
 
-This Node.js application provides a powerful Slack bot that integrates with AnythingLLM for knowledge retrieval and conversation, and GitHub for release information, issue analysis, pull request reviews, and direct API interactions.
-
-## Overview
-
-The bot listens for direct messages (DMs) and mentions in Slack channels. It processes user queries, interacts with configured AnythingLLM workspaces to provide answers based on ingested knowledge, and leverages GitHub integration for specific development-related tasks. It includes features like conversation history context, feedback collection, duplicate event prevention, and robust message formatting.
+A modular Slack bot designed as an AI assistant to support developers working with **Gravity Forms and its ecosystem**. It leverages AI to answer questions, retrieve relevant information, and perform specific GitHub actions related to Gravity Forms development.
 
 ## Features
 
 * **Slack Interaction:** Responds to Direct Messages and @mentions.
-* **AnythingLLM Integration:**
-    * Queries specified AnythingLLM workspaces for information.
-    * Maintains conversation context within Slack threads by mapping them to AnythingLLM threads.
-    * Supports manual workspace override for new threads (e.g., `@Bot #workspace query...`).
+* **AI-Powered Assistance:** Provides answers and insights based on its knowledge of Gravity Forms development, documentation, code examples, and best practices within Slack threads.
 * **GitHub Integration (Requires `GITHUB_TOKEN`):**
-    * **Release Checks:** Fetches the latest release information for configured GitHub repositories (e.g., `@Bot latest gravityforms release?`).
-    * **Issue Analysis:** Summarizes and analyzes GitHub issues from a specified repository (e.g., `@Bot analyze issue #123 What are the potential causes?`).
-    * **Pull Request Review:** Fetches PR details (description, diff, comments) and uses an LLM (via a specified workspace) to provide a code review (e.g., `@Bot review pr gravityforms/repo#456 #workspace-slug`).
+    * **Release Checks:** Fetches the latest release information for configured GitHub repositories (e.g., `@Orbit latest gravityforms release?`).
+    * **Issue Analysis:** Summarizes and analyzes GitHub issues from a specified repository (e.g., `@Orbit analyze issue #123 What are the potential causes?`).
+    * **Pull Request Review:** Fetches PR details (description, diff, comments) and uses an LLM (via a specified workspace) to provide a code review (e.g., `@Orbit review pr gravityforms/repo#456 #workspace-slug`).
     * **GitHub API Gateway:** Translates natural language requests (prefixed with `github` or containing `#github`) into GitHub API calls using a dedicated LLM workspace (`githubWorkspaceSlug`) and formats the results using another optional LLM workspace (`formatterWorkspaceSlug`).
 * **Slack Commands:**
-    * `#delete_last_message`: In a thread, tells the bot to delete its most recent response (useful for correcting errors or removing noise).
-    * `#saveToConversations`: In a thread, exports the conversation history to a Markdown file, posts it to the thread, and optionally uploads it to a configured AnythingLLM 'conversations' workspace.
-* **Conversation Context:** Fetches recent messages from a thread to provide context for LLM queries.
-* **Feedback System:** Adds feedback buttons (👎, 👌, 👍) to substantive bot responses and stores the feedback in a PostgreSQL database (if configured).
-* **Message Formatting:**
-    * Handles Markdown in LLM responses for rich text formatting in Slack.
-    * Displays code blocks with syntax highlighting.
-    * Uploads large JSON responses as files.
-    * Splits long messages into manageable chunks.
-* **Deduplication:** Uses Redis (if configured) to prevent processing duplicate Slack events.
-* **Robust Error Handling:** Provides informative messages for common issues (e.g., failed API calls, configuration errors).
+    * `#save`: In a thread, exports the conversation history to a Markdown file, posts it to the thread, and optionally uploads it to a configured AnythingLLM 'conversations' workspace.
 
 ## Prerequisites
 
@@ -108,7 +91,7 @@ You also need to enable:
     FALLBACK_WORKSPACE=all # Default workspace if no specific mapping found
     # ENABLE_USER_WORKSPACES=false
     # USER_WORKSPACE_MAPPING={"user1":"user_workspace1"}
-    CONVERSATION_EXPORT_WORKSPACE=conversations # Workspace slug for #saveToConversations uploads
+    CONVERSATION_EXPORT_WORKSPACE=conversations # Workspace slug for #save uploads
 
     # GitHub Configuration (Required for GitHub features)
     GITHUB_TOKEN=ghp_your_github_personal_access_token
@@ -171,7 +154,7 @@ Environment variables are used for configuration (loaded from `.env` file using 
 * **`FALLBACK_WORKSPACE` (Optional):** Workspace slug to use if no specific mapping is found. Defaults to `all`.
 * **`ENABLE_USER_WORKSPACES` (Optional):** Set to `true` to enable per-user workspace mappings. Defaults to `false`.
 * **`USER_WORKSPACE_MAPPING` (Optional):** JSON string mapping Slack User IDs to AnythingLLM workspace slugs if `ENABLE_USER_WORKSPACES` is true.
-* **`CONVERSATION_EXPORT_WORKSPACE` (Optional):** The AnythingLLM workspace slug where exported conversations (`#saveToConversations`) should be uploaded. Defaults to `conversations`.
+* **`CONVERSATION_EXPORT_WORKSPACE` (Optional):** The AnythingLLM workspace slug where exported conversations (`#save`) should be uploaded. Defaults to `conversations`.
 * **`GITHUB_TOKEN` (Optional):** GitHub Personal Access Token (Classic) required for all GitHub features.
 * **`GITHUB_WORKSPACE_SLUG` (Optional):** AnythingLLM workspace slug specifically trained to understand GitHub API requests and generate the necessary JSON parameters for `callGithubApi`. Required for the `github`/`#github` command.
 * **`FORMATTER_WORKSPACE_SLUG` (Optional):** AnythingLLM workspace slug trained to take raw JSON GitHub API responses and format them nicely in Markdown for Slack. Used by the `github`/`#github` command.
@@ -187,32 +170,23 @@ Environment variables are used for configuration (loaded from `.env` file using 
 1.  **Invite the Bot:** Invite the bot user to any channels you want it to operate in.
 2.  **Interact:**
     * **Direct Message (DM):** Send a message directly to the bot app.
-    * **Mention:** Mention the bot in a channel it's part of (e.g., `@YourBotName what is the status of project X?`).
+    * **Mention:** Mention the bot in a channel it's part of (e.g., `@Orbit what is the status of project X?`).
 3.  **Commands & Features:**
-    * **General Queries:** Ask questions related to the knowledge in the configured AnythingLLM workspace(s). The bot will automatically use the mapped workspace or the fallback. For new threads, you can specify a workspace: `@BotName #specific-workspace How do I configure feature Y?`
+    * **General Queries:** Ask questions related to the knowledge in the configured AnythingLLM workspace(s). The bot will automatically use the mapped workspace or the fallback. For new threads, you can specify a workspace: `@Orbit #specific-workspace How do I configure feature Y?`
     * **GitHub Release Check:** Ask for the latest release of supported products (uses abbreviations/repo names configured in the code):
-        * `@BotName latest gravityforms release?`
-        * `@BotName latest stripe addon release?`
-        * `@BotName latest ppcp release?`
+        * `@Orbit latest gravityforms release?`
+        * `@Orbit latest stripe addon release?`
+        * `@Orbit latest ppcp release?`
     * **GitHub Issue Analysis:** Ask the bot to summarize or analyze a GitHub issue (currently hardcoded to `gravityforms/backlog` but adaptable):
-        * `@BotName summarize issue #123`
-        * `@BotName analyze backlog #456 What are the potential side effects?`
+        * `@Orbit summarize issue #123`
+        * `@Orbit analyze backlog #456 What are the potential side effects?`
     * **GitHub Pull Request Review:** Ask the bot to review a specific PR (currently hardcoded to `gravityforms/` owner but adaptable):
-        * `@BotName review pr gravityforms/gravityforms#789 #core-dev` (where `#core-dev` is the AnythingLLM workspace slug used for the review analysis).
+        * `@Orbit review pr gravityforms/gravityforms#789 #core-dev` (where `#core-dev` is the AnythingLLM workspace slug used for the review analysis).
     * **GitHub API Gateway:** Use natural language to query the GitHub API (requires `GITHUB_WORKSPACE_SLUG`):
-        * `@BotName github list open issues for google/zx tagged bug`
-        * `@BotName show repo details for octokit/rest.js #github`
-    * **Export Conversation:** In a thread you want to save, reply with the message `#saveToConversations`.
-    * **Delete Last Bot Message:** In a thread, if the bot's last message was incorrect or unwanted, reply with `#delete_last_message`.
-    * **Feedback:** Click the 👎, 👌, or 👍 buttons on the bot's responses to provide feedback (requires `DATABASE_URL`).
+        * `@Orbit github list open issues for google/zx tagged bug`
+        * `@Orbit show repo details for octokit/rest.js #github`
+    * **Export Conversation:** In a thread you want to save, reply with the message `#save`.
 
-## Feedback System
-
-When the bot provides a response deemed substantive (based on length and content), feedback buttons are appended.
-
-* Clicking a button sends the feedback value (`bad`, `ok`, `great`), user ID, channel ID, message timestamps, and the workspace slug used for the response to the backend.
-* If `DATABASE_URL` is configured, this feedback is stored in the `feedback` table in PostgreSQL.
-* The buttons on the original message are replaced with a "Thanks for the feedback!" confirmation.
 
 ## Contributing
 

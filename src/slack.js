@@ -1287,9 +1287,9 @@ async function handleSlackEvent(event, body) {
         return;
     }
 
-    // Check for #saveToConversations hashtag
-    if (event.type === 'message' && event.text?.includes('#saveToConversations')) {
-        console.log('[Slack Event] #saveToConversations detected in thread');
+    // Check for #save hashtag
+    if (event.type === 'message' && event.text?.includes('#save')) {
+        console.log('[Slack Event] #save detected in thread');
         await handleExportCommand(event.channel, event.thread_ts || event.ts, event.user);
         return;
     }
@@ -1347,7 +1347,7 @@ async function handleExportCommand(channel, thread_ts, user) {
         });
 
         // Prepare status message based on AnythingLLM upload result
-        let statusText = ':white_check_mark: Conversation exported successfully!';
+        let statusText = ':white_check_mark: Conversation saved successfully!';
         if (llmResponse?.success) {
             statusText += '\n:brain: Added to AnythingLLM conversations workspace!';
         } else if (llmError) {
