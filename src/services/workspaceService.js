@@ -80,6 +80,11 @@ export async function determineWorkspace({ suggestedWorkspace, userId, channelId
   }
 
   // 4. Use fallback workspace - Use direct variable
+  // Added logging: Log fallback value and available slugs before check
+  logger.debug({ 
+      checkingFallback: fallbackWorkspace, 
+      availableSlugs: availableSlugs 
+  }, 'Checking fallback workspace against available slugs');
   if (fallbackWorkspace && availableSlugs.includes(fallbackWorkspace)) {
     logger.debug({ workspace: fallbackWorkspace }, 'Using fallback workspace');
     return fallbackWorkspace;
