@@ -491,7 +491,20 @@ export async function handleGithubPrefixedCommand(commandArgs, { channelId, repl
                 break;
             }
 
-            // Add cases for other gh- sub-commands
+            case 'api': // Handle gh-api
+                handleGithubApiCommand(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                    .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub API command handler via prefix'));
+                break;
+
+            case 'review-pr':
+                handleGithubPrReview(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                    .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub PR review handler via prefix'));
+                break;
+
+            case 'analyze-issue':
+                 handleGithubIssueAnalysis(commandArgs, { channelId, replyTarget, slackWebClient, userId })
+                    .catch(err => logger.error({ ...logContext, command: subCommand, error: err }, 'Error executing GitHub issue analysis handler via prefix'));
+                break;
 
             default:
                 logger.warn({ ...logContext, subCommand }, 'Unknown gh- sub-command received.');

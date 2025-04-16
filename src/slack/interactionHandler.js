@@ -308,6 +308,18 @@ export async function handleInteraction(payload, slackWebClient) {
                             handleGithubPrefixedCommand(`pr ${subCommandArgs}`, { channelId, replyTarget, slackWebClient, userId })
                                 .catch(err => logger.error({ ...githubLogContext, error: err }, 'Error executing github pr handler via slash command'));
                             break;
+                        case 'api': // Handle /github api
+                            handleGithubApiCommand(subCommandArgs, { channelId, replyTarget, slackWebClient, userId })
+                                .catch(err => logger.error({ ...githubLogContext, error: err }, 'Error executing github api handler via slash command'));
+                            break;
+                        case 'review-pr': // Handle /github review-pr
+                            handleGithubPrReview(subCommandArgs, { channelId, replyTarget, slackWebClient, userId })
+                                .catch(err => logger.error({ ...githubLogContext, error: err }, 'Error executing github pr review handler via slash command'));
+                            break;
+                        case 'analyze-issue': // Handle /github analyze-issue
+                            handleGithubIssueAnalysis(subCommandArgs, { channelId, replyTarget, slackWebClient, userId })
+                                .catch(err => logger.error({ ...githubLogContext, error: err }, 'Error executing github issue analysis handler via slash command'));
+                            break;
                         default:
                             logger.warn(githubLogContext, 'Unknown /github sub-command');
                              try {
