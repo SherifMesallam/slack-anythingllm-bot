@@ -107,32 +107,32 @@ function verifySlackSignature(secret, timestamp, requestBody, signatureHeader) {
 // --- Express App Setup ---
 const app = express();
 
-// --- Conditional Body Parsing Middleware ---
-// Apply raw body parsing for /slack/events and urlencoded (with verify) for /slack/interactions
-app.use((req, res, next) => {
-    if (req.originalUrl === '/slack/events') {
-        express.raw({ type: 'application/json', limit: '10mb' })(req, res, next);
-    } else if (req.originalUrl === '/slack/interactions') {
-        express.urlencoded({
-            extended: true,
-            limit: '10mb',
-            verify: (req, res, buf, encoding) => {
-                // Store the raw buffer string on the request object
-                if (buf && buf.length) {
-                    logger.debug({ length: buf.length, encoding }, 'Raw body captured by express.urlencoded verify function');
-                    req.rawBodyString = buf.toString(encoding || 'utf8');
-                } else {
-                    logger.warn('express.urlencoded verify function received empty or no buffer');
-                }
+// --- Global Raw Body Capture Middleware ---
+// Use express.raw globally, but use verify to conditionally assign the raw body
+// based on route and content type for signature verification purposes.
+app.use(express.raw({
+    type: '*/*', // Apply to all content types initially
+    limit: '10mb',
+    verify: (req, res, buf, encoding) => {
+        logger.debug({ url: req.originalUrl, contentType: req.headers['content-type'] }, 'Global express.raw verify running');
+        if (buf && buf.length) {
+            if (req.originalUrl === '/slack/events' && req.headers['content-type'] === 'application/json') {
+                req.rawBody = buf; // Assign raw buffer for events
+                logger.debug('Attached req.rawBody for /slack/events');
+            } else if (req.originalUrl === '/slack/interactions' && req.headers['content-type'] === 'application/x-www-form-urlencoded') {
+                req.rawBodyString = buf.toString(encoding || 'utf8'); // Assign raw string for interactions
+                logger.debug('Attached req.rawBodyString for /slack/interactions');
+            } else {
+                 logger.debug('Global express.raw verify ignored (route/type mismatch)');
             }
-        })(req, res, next);
-    } else {
-        next(); // Continue for other routes
+        } else {
+             logger.warn('Global express.raw verify received empty buffer');
+        }
     }
-});
+}));
 
 // --- Slack Event Handling ---
-// Changed from app.use to app.post, removed inline express.raw
+// Checks req.rawBody (assigned by global middleware's verify function)
 app.post('/slack/events', async (req, res, next) => {
     // Added logging: Log entry and headers
     logger.info({
@@ -151,10 +151,10 @@ app.post('/slack/events', async (req, res, next) => {
     // Added logging: Check rawBody before verification
     logger.debug({ hasRawBody: !!req.rawBody, rawBodyType: typeof req.rawBody, rawBodyLength: req.rawBody?.length }, 'Checking req.rawBody before event signature verification');
     if (!req.rawBody) {
-        logger.error('Raw body missing from request. Ensure raw body parsing middleware ran correctly.'); // Updated error message
+        logger.error('req.rawBody missing for /slack/events. Global verify function failed?'); // Updated error
         return res.status(500).send('Internal Server Error');
     }
-    const rawBodyString = req.rawBody.toString();
+    const rawBodyString = req.rawBody.toString(); // Use the captured rawBody
 
     if (!timestamp || !signature) {
         logger.warn('Missing Slack timestamp or signature headers');
@@ -242,8 +242,9 @@ app.post('/slack/events', async (req, res, next) => {
 
 
 // --- Interaction Endpoint ---
-// Removed inline express.urlencoded
-app.post('/slack/interactions', async (req, res) => {
+// Checks req.rawBodyString (assigned by global middleware's verify function)
+// Then, uses express.urlencoded *after* verification to parse the body.
+app.post('/slack/interactions', async (req, res, next) => { // Add next for middleware
 
     // Added logging: Log entry and headers for interactions
     logger.info({
@@ -256,24 +257,45 @@ app.post('/slack/interactions', async (req, res) => {
         }
     }, 'Entering /slack/interactions handler');
 
+    // --- Verify Signature --- Start
+    const timestamp = req.headers['x-slack-request-timestamp'];
+    const signature = req.headers['x-slack-signature'];
+
+    if (!timestamp || !signature) {
+        logger.warn('Interaction request missing Slack timestamp or signature headers');
+        return res.status(400).send('Missing signature headers');
+    }
+
     // Added logging: Check rawBodyString before verification
     logger.debug({ hasRawBodyString: !!req.rawBodyString, rawBodyStringType: typeof req.rawBodyString, rawBodyStringLength: req.rawBodyString?.length }, 'Checking req.rawBodyString before interaction signature verification');
     if (!req.rawBodyString) {
-        logger.error('Raw body string missing from interaction request. Verification middleware failed?');
+        logger.error('Raw body string missing from interaction request. Global verify function failed?'); // Updated error
         return res.status(500).send('Internal Server Error');
     }
 
-    const isVerified = verifySlackSignature(signingSecret, req.headers['x-slack-request-timestamp'], req.rawBodyString, req.headers['x-slack-signature']);
+    const isVerified = verifySlackSignature(signingSecret, timestamp, req.rawBodyString, signature);
 
     if (!isVerified) {
        logger.warn('Interaction signature verification failed!');
        return res.status(403).send('Signature verification failed');
     }
+    // --- Verify Signature --- End
 
-    // Signature is verified, now process the payload (which is already parsed by urlencoded)
+    // Signature is verified, NOW parse the urlencoded body to access payload
+    // Pass control to the next middleware which is the urlencoded parser
+    next();
+
+}, express.urlencoded({ extended: true, limit: '10mb' }), async (req, res) => {
+    // This middleware runs AFTER verification AND urlencoded parsing
+
+    // Process the payload (which is now parsed into req.body by the previous middleware)
     let payload;
     try {
         // The payload is nested within the parsed body
+        if (!req.body || !req.body.payload) {
+             logger.error({ bodyKeys: req.body ? Object.keys(req.body) : null }, 'req.body or req.body.payload missing after urlencoded parsing in interaction handler');
+             return res.status(400).send('Invalid interaction payload format');
+        }
         payload = JSON.parse(req.body.payload);
     } catch (parseError) {
         logger.error({ error: parseError, body: req.body }, 'Failed to parse interaction payload JSON');
