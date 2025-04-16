@@ -53,7 +53,7 @@ export async function getWorkspaces(useCache = true) {
  */
 export async function determineWorkspace({ suggestedWorkspace, userId, channelId }) {
   const availableWorkspaces = await getWorkspaces();
-  const availableSlugs = availableWorkspaces.map(ws => ws.slug);
+  const availableSlugs = availableWorkspaces;
 
   // 1. Check suggested workspace validity
   if (suggestedWorkspace && availableSlugs.includes(suggestedWorkspace)) {
