@@ -7,7 +7,7 @@ import {
     workspaceMapping, 
     fallbackWorkspace 
 } from '../config.js'; // Import specific config vars
-// import { getWorkspaces as fetchWorkspacesFromLLM } from '../llm.js'; // Assuming the raw fetch function is here
+import { getWorkspaces as fetchWorkspacesFromLLM } from '../llm.js'; // Uncommented import
 
 // TODO: Implement robust caching (in-memory with TTL, potentially Redis for multi-instance)
 let workspaceCache = {
@@ -31,8 +31,7 @@ export async function getWorkspaces(useCache = true) {
   logger.info('Fetching workspaces from LLM API...');
   // TODO: Add performance timing here
   try {
-    // const workspaces = await fetchWorkspacesFromLLM(); // Replace with actual call
-    const workspaces = []; // Placeholder
+    const workspaces = await fetchWorkspacesFromLLM(); // Replace placeholder with actual call
     workspaceCache.data = workspaces;
     workspaceCache.lastUpdated = Date.now();
     logger.info({ count: workspaces.length }, 'Workspaces fetched and cached');
