@@ -29,7 +29,7 @@ export const redisUrl = process.env.REDIS_URL || null;
 export const databaseUrl = process.env.DATABASE_URL || null;
 export const githubToken = process.env.GITHUB_TOKEN || null; // Optional: Used for GitHub features (release check)
 export const githubWorkspaceSlug = process.env.GITHUB_WORKSPACE_SLUG || null;
-export const formatterWorkspaceSlug = process.env.FORMATTER_WORKSPACE_SLUG || null; // Added formatter slug
+export const formatterWorkspaceSlug = process.env.FORMATTER_WORKSPACE_SLUG || 'formatter'; // Added formatter slug
 
 // --- Bot Behavior Configuration ---
 export const logLevel = process.env.LOG_LEVEL || 'debug'; // Default log level
@@ -47,7 +47,7 @@ export const intentConfidenceThreshold = parseFloat(process.env.INTENT_CONFIDENC
 export const geminiApiKey = process.env.GEMINI_API_KEY || null; // API key for Gemini provider
 // Workspace slugs for specific LLM tasks
 export const githubIssueAnalysisWorkspaceSlug = process.env.GITHUB_ISSUE_ANALYSIS_WORKSPACE_SLUG || null;
-export const githubPrReviewWorkspaceSlug = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || null;
+export const githubPrReviewWorkspaceSlug = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || 'github';
 export const feedbackEnabled = process.env.FEATURE_FEEDBACK_ENABLED || false;
 export const githubFeaturesEnabled = process.env.FEATURE_GITHUB_COMMANDS_ENABLED || true;
 export const conversationExportEnabled = process.env.FEATURE_EXPORT_CONVERSATION_ENABLED || true;
