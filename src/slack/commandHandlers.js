@@ -11,7 +11,7 @@ import {
     githubIssueAnalysisWorkspaceSlug,
     githubPrReviewWorkspaceSlug
 } from '../config.js'; // Need botUserId, feature flags, specific workspace slugs
-import { getLatestRelease, getPrDetails } from '../services.js'; // Import the migrated function and getPrDetails
+import { getLatestRelease, getPrDetails, getPrFiles, getPrDiff } from '../services.js'; // Import the migrated function and getPrDetails
 import { markdownToRichTextBlock, getGithubIssueDetails } from '../utils.js'; // Import formatting utility and getGithubIssueDetails
 import { exportConversationToMarkdown } from '../conversation-export.js'; // Import the export function
 import { callGithubApi } from '../utils.js'; // Import callGithubApi
