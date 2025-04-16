@@ -1,4 +1,3 @@
-import { slack } from './slack.js';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
@@ -9,9 +8,10 @@ import axios from 'axios';
  * Formats a Slack message into Markdown
  * @param {Object} message - Slack message object
  * @param {Object} userInfo - User info cache object
+ * @param {object} slackWebClient - The initialized Slack WebClient.
  * @returns {Promise<string>} Formatted markdown string
  */
-async function formatMessageToMarkdown(message, userInfo) {
+async function formatMessageToMarkdown(message, userInfo, slackWebClient) {
     // Skip command messages, status updates, and system messages
     if (
         message.text?.includes('#saveToConversations') ||
@@ -27,7 +27,7 @@ async function formatMessageToMarkdown(message, userInfo) {
     // Get user info if not in cache
     if (!userInfo[message.user]) {
         try {
-            const result = await slack.users.info({ user: message.user });
+            const result = await slackWebClient.users.info({ user: message.user });
             userInfo[message.user] = result.user;
         } catch (error) {
             console.error(`Error fetching user info for ${message.user}:`, error);
@@ -37,10 +37,10 @@ async function formatMessageToMarkdown(message, userInfo) {
 
     const userName = userInfo[message.user]?.real_name || 'Unknown User';
     const timestamp = new Date(parseFloat(message.ts) * 1000).toISOString();
-    
+
     // Format the message text
     let messageText = '';
-    
+
     // Handle message blocks if present
     if (message.blocks) {
         messageText = message.blocks.map(block => {
@@ -59,12 +59,12 @@ async function formatMessageToMarkdown(message, userInfo) {
             return '';
         }).join('\n');
     }
-    
+
     // Fallback to plain text if no blocks or empty blocks
     if (!messageText.trim()) {
         messageText = message.text || '';
     }
-    
+
     // Handle code blocks
     messageText = messageText.replace(/```(\w+)?\n([\s\S]+?)```/g, (match, lang, code) => {
         const language = lang || '';
@@ -81,7 +81,7 @@ async function formatMessageToMarkdown(message, userInfo) {
     messageText = messageText.replace(/<@(\w+)>/g, async (match, userId) => {
         if (!userInfo[userId]) {
             try {
-                const result = await slack.users.info({ user: userId });
+                const result = await slackWebClient.users.info({ user: userId });
                 userInfo[userId] = result.user;
             } catch (error) {
                 return '@Unknown User';
@@ -97,7 +97,9 @@ async function formatMessageToMarkdown(message, userInfo) {
  * Exports a Slack conversation to Markdown format
  * @param {string} channelId - Slack channel ID
  * @param {string} threadTs - Thread timestamp
- * @returns {Promise<{content: string, metadata: Object}>} Markdown content and metadata
+ * @param {object} slackWebClient - The initialized Slack WebClient.
+ * @param {boolean} uploadToLLM - Whether to upload to AnythingLLM
+ * @returns {Promise<{content: string, metadata: Object, llmResponse?: Object}>} Markdown content and metadata
  */
 /**
  * Uploads a document to AnythingLLM workspace
@@ -185,7 +187,7 @@ async function uploadToAnythingLLM(content, filename) {
         );
 
         console.log('[AnythingLLM] Chat response:', JSON.stringify(chatResponse.data, null, 2));
-        
+
         // Get title from LLM response and clean it up
         let suggestedTitle = chatResponse.data.textResponse;
         if (!suggestedTitle) {
@@ -196,7 +198,7 @@ async function uploadToAnythingLLM(content, filename) {
         suggestedTitle = suggestedTitle.trim()
             .replace(/[^a-zA-Z0-9-_ ]/g, '')
             .replace(/\s+/g, '-');
-        
+
         console.log('[AnythingLLM] Suggested title:', suggestedTitle);
 
         // Create filename with title and date
@@ -234,7 +236,7 @@ async function uploadToAnythingLLM(content, filename) {
             'Authorization': 'Bearer [REDACTED]',
             'Accept': 'application/json'
         });
-        
+
         // Upload to AnythingLLM
         const response = await axios.post(`${anythingLLMBaseUrl}/api/v1/document/upload`, form, {
             headers: {
@@ -245,14 +247,14 @@ async function uploadToAnythingLLM(content, filename) {
             maxBodyLength: Infinity,
             maxContentLength: Infinity
         });
-        
+
         console.log('[AnythingLLM] Upload successful');
         console.log('[AnythingLLM] Response status:', response.status);
         console.log('[AnythingLLM] Response headers:', response.headers);
         console.log('[AnythingLLM] Response data:', JSON.stringify(response.data, null, 2));
 
         const uploadResponse = response.data;
-        
+
         // If upload successful, move to conversations folder and add to workspace
         if (uploadResponse.success && uploadResponse.documents && uploadResponse.documents.length > 0) {
             console.log('[AnythingLLM] Document uploaded successfully, moving to conversations folder...');
@@ -291,7 +293,7 @@ async function uploadToAnythingLLM(content, filename) {
             console.error('[AnythingLLM] Upload response missing required data:', uploadResponse);
             throw new Error('Upload response missing required data');
         }
-        
+
         return uploadResponse;
     } finally {
         // Clean up temp file
@@ -303,13 +305,14 @@ async function uploadToAnythingLLM(content, filename) {
  * Exports a Slack conversation to Markdown and optionally uploads to AnythingLLM
  * @param {string} channelId - Slack channel ID
  * @param {string} threadTs - Thread timestamp
+ * @param {object} slackWebClient - The initialized Slack WebClient.
  * @param {boolean} uploadToLLM - Whether to upload to AnythingLLM
  * @returns {Promise<{content: string, metadata: Object, llmResponse?: Object}>}
  */
-export async function exportConversationToMarkdown(channelId, threadTs, uploadToLLM = true) {
+export async function exportConversationToMarkdown(channelId, threadTs, slackWebClient, uploadToLLM = true) {
     try {
         // Get channel info
-        const channelInfo = await slack.conversations.info({ channel: channelId });
+        const channelInfo = await slackWebClient.conversations.info({ channel: channelId });
         const channelName = channelInfo.channel.name || 'unknown-channel';
 
         // Get conversation history with pagination
@@ -317,7 +320,7 @@ export async function exportConversationToMarkdown(channelId, threadTs, uploadTo
         let cursor;
 
         do {
-            const result = await slack.conversations.replies({
+            const result = await slackWebClient.conversations.replies({
                 channel: channelId,
                 ts: threadTs,
                 limit: 100,
@@ -343,7 +346,7 @@ export async function exportConversationToMarkdown(channelId, threadTs, uploadTo
 
         // Process each message
         for (const message of allMessages) {
-            markdown += await formatMessageToMarkdown(message, userInfo);
+            markdown += await formatMessageToMarkdown(message, userInfo, slackWebClient);
         }
 
         // Add export metadata

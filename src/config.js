@@ -48,7 +48,9 @@ export const geminiApiKey = process.env.GEMINI_API_KEY || null; // API key for G
 // Workspace slugs for specific LLM tasks
 export const githubIssueAnalysisWorkspaceSlug = process.env.GITHUB_ISSUE_ANALYSIS_WORKSPACE_SLUG || null;
 export const githubPrReviewWorkspaceSlug = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || null;
-export const feedbackEnabled = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || false;
+export const feedbackEnabled = process.env.FEATURE_FEEDBACK_ENABLED || false;
+export const githubFeaturesEnabled = process.env.FEATURE_GITHUB_COMMANDS_ENABLED || true;
+export const conversationExportEnabled = process.env.FEATURE_EXPORT_CONVERSATION_ENABLED || true;
 // List of all possible intents the bot might detect
 export const possibleIntents = [
   'general_query',          // Default fallback for general questions

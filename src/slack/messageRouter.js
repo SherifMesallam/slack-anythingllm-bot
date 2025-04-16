@@ -1,7 +1,6 @@
 // Routes incoming Slack message events
 import logger from '../logger.js';
 import {
-    config,
     botUserId,
     githubFeaturesEnabled,
     commandPrefixes,
@@ -376,4 +375,4 @@ export async function routeMessageEvent(event, slackWebClient) {
     suggestedWorkspace, // Pass suggestion from intent routing (will be null if disabled or no suggestion)
     slackWebClient
   });
-} 
+}

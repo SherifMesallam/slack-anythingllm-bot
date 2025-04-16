@@ -1,12 +1,12 @@
 // Service to detect intent and suggest workspace using a configured provider
 import logger from '../logger.js';
-import { config } from '../config.js';
+import { intentProvider } from '../config.js'; // Import specific config
 
 // Dynamically import providers based on config
 let provider;
 
 async function loadProvider() {
-  const providerName = config.intentProvider || 'none';
+  const providerName = intentProvider || 'none';
   logger.info({ providerName }, 'Loading intent provider');
   try {
     switch (providerName) {
@@ -39,11 +39,11 @@ export async function detectIntentAndWorkspace(query, availableIntents, availabl
   try {
     const result = await provider.detectIntentAndWorkspace(query, availableIntents, availableWorkspaces);
     const durationMs = performance.now() - timer;
-    logger.debug({ durationMs, provider: config.intentProvider, query }, 'Intent detection completed');
+    logger.debug({ durationMs, provider: intentProvider, query }, 'Intent detection completed');
     return result;
   } catch (error) {
     const durationMs = performance.now() - timer;
-    logger.error({ error, durationMs, provider: config.intentProvider, query }, 'Error during intent detection');
+    logger.error({ error, durationMs, provider: intentProvider, query }, 'Error during intent detection');
     return { intent: null, confidence: 0, suggestedWorkspace: null }; // Fail safe
   }
 } 

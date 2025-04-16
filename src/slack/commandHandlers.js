@@ -4,12 +4,16 @@ import {
     botUserId,
     githubFeaturesEnabled,
     conversationExportEnabled,
-    GITHUB_OWNER // Import default owner if needed
-} from '../config.js'; // Need botUserId for filtering messages, githubFeaturesEnabled flag
+    GITHUB_OWNER, // Import default owner if needed
+    // Specific config variables needed by handlers:
+    githubWorkspaceSlug,
+    formatterWorkspaceSlug,
+    githubIssueAnalysisWorkspaceSlug,
+    githubPrReviewWorkspaceSlug
+} from '../config.js'; // Need botUserId, feature flags, specific workspace slugs
 import { getLatestRelease, getPrDetails } from '../services.js'; // Import the migrated function and getPrDetails
 import { markdownToRichTextBlock, getGithubIssueDetails } from '../utils.js'; // Import formatting utility and getGithubIssueDetails
 import { exportConversationToMarkdown } from '../conversation-export.js'; // Import the export function
-import { config } from '../config.js'; // Import config
 import { callGithubApi } from '../utils.js'; // Import callGithubApi
 import { queryLlm } from '../llm.js'; // Import LLM query function for API handler
 // Import services and utils as needed later
@@ -272,8 +276,8 @@ export async function handleExportCommand({ channelId, threadTs, userId, slackWe
         logger.debug({ ...logContext, statusTs: statusMessage?.ts }, 'Posted initial export status message');
 
         // Export the conversation
-        // Assuming exportConversationToMarkdown returns { content: string, metadata: object, llmResponse: object|null, llmError: string|null }
-        const exportResult = await exportConversationToMarkdown(channelId, threadTs);
+        // Pass the slackWebClient instance
+        const exportResult = await exportConversationToMarkdown(channelId, threadTs, slackWebClient);
         const { content, metadata, llmResponse, llmError } = exportResult;
 
         if (!content) {
@@ -534,19 +538,19 @@ export async function handleGithubApiCommand(commandArgs, { channelId, replyTarg
             text: ':brain: Asking the AI overlords how to call the GitHub API for you...'
         });
 
-        // 2. Validate config (githubWorkspaceSlug)
-        if (!config.githubWorkspaceSlug) {
+        // 2. Validate config (use direct variable)
+        if (!githubWorkspaceSlug) {
             throw new Error('GitHub API generation workspace (githubWorkspaceSlug) is not configured.');
         }
 
-        // 3. Call LLM (githubWorkspaceSlug) to get apiDetails object
+        // 3. Call LLM (githubWorkspaceSlug) (use direct variable)
         logger.debug({ ...logContext }, 'Calling LLM to generate GitHub API details...');
         const apiGenPrompt = `You are an AI assistant that translates natural language requests into GitHub API call details. Given the user request below, generate a JSON object containing the necessary details to call the GitHub REST API. The JSON object should have the following keys: "endpoint" (required, the full API URL like "https://api.github.com/repos/owner/repo/issues"), "method" (optional, defaults to GET, e.g., "POST", "PATCH"), "parameters" (optional, an object containing URL query parameters for GET or the request body for POST/PATCH/PUT), and "headers" (optional, an object for any custom headers needed beyond standard auth/accept provided by the caller).\\n\\nUser Request: "${commandArgs}"\\n\\nOutput ONLY the JSON object:\\n`;
 
         // NOTE: queryLlm typically needs a threadSlug. We might need a dedicated utility thread 
         // or adapt queryLlm/llm.js if it can handle direct workspace queries without a persistent thread.
         // For now, assuming queryLlm can work with just workspace slug and prompt, or handle thread implicitly.
-        const llmApiDetailsResponse = await queryLlm(config.githubWorkspaceSlug, null, apiGenPrompt); // Pass null for threadSlug for now
+        const llmApiDetailsResponse = await queryLlm(githubWorkspaceSlug, null, apiGenPrompt); // Pass null for threadSlug for now
 
         if (!llmApiDetailsResponse) {
             throw new Error('LLM did not provide a response for API details generation.');
@@ -574,16 +578,16 @@ export async function handleGithubApiCommand(commandArgs, { channelId, replyTarg
         logger.debug({ ...logContext, apiDetails }, 'Calling callGithubApi utility...');
         const apiResponse = await callGithubApi(apiDetails); // Pass the parsed details
 
-        // 5. Optionally format response with another LLM (formatterWorkspaceSlug)
+        // 5. Optionally format response (use direct variable)
         let formattedResponseText = null;
         let responseAsFile = false;
         const MAX_MESSAGE_LENGTH = 3800; // Slack message limit is ~4000, leave some buffer
 
-        if (config.formatterWorkspaceSlug && typeof apiResponse === 'object' && apiResponse !== null) {
+        if (formatterWorkspaceSlug && typeof apiResponse === 'object' && apiResponse !== null) {
             logger.debug({ ...logContext }, 'Calling LLM to format API response...');
             const formatPrompt = `You are an AI assistant that summarizes GitHub API JSON responses into user-friendly text suitable for Slack. Format the following JSON response concisely:\\n\\n${JSON.stringify(apiResponse, null, 2)}\\n\\nSummary:`;
             // Assuming queryLlm can handle this scenario (might need adaptation)
-            formattedResponseText = await queryLlm(config.formatterWorkspaceSlug, null, formatPrompt);
+            formattedResponseText = await queryLlm(formatterWorkspaceSlug, null, formatPrompt);
 
             if (!formattedResponseText) {
                 logger.warn({ ...logContext }, 'Formatting LLM failed to provide a response. Falling back to raw JSON.');
@@ -677,7 +681,7 @@ export async function handleGithubIssueAnalysis(commandArgs, { channelId, replyT
         return;
     }
 
-    if (!config.githubIssueAnalysisWorkspaceSlug) {
+    if (!githubIssueAnalysisWorkspaceSlug) {
         logger.warn(logContext, 'GitHub issue analysis workspace (githubIssueAnalysisWorkspaceSlug) is not configured.');
         await slackWebClient.chat.postMessage({ channel: channelId, thread_ts: replyTarget, text: 'GitHub issue analysis feature is not configured.' });
         return;
@@ -730,7 +734,7 @@ export async function handleGithubIssueAnalysis(commandArgs, { channelId, replyT
             throw new Error(`Could not fetch details for issue ${owner}/${repo}#${issueNumber}.`);
         }
 
-        // 4. Prepare prompt and call LLM
+        // 4. Prepare prompt and call LLM (use direct variable)
         let issueContent = `Issue Title: ${issueDetails.title}\n\n`;
         if (issueDetails.body) {
             issueContent += `Issue Body:\n${issueDetails.body}\n\n`;
@@ -745,7 +749,7 @@ export async function handleGithubIssueAnalysis(commandArgs, { channelId, replyT
         const analysisPrompt = `Analyze the following GitHub issue details and provide a concise summary. Identify the core problem or request, and suggest potential next steps or classifications if applicable.\n\nIssue URL: ${issueDetails.url}\n\n${issueContent}\n\nAnalysis:`;
 
         logger.debug({ ...logContext }, 'Calling LLM for issue analysis...');
-        const analysisResult = await queryLlm(config.githubIssueAnalysisWorkspaceSlug, null, analysisPrompt);
+        const analysisResult = await queryLlm(githubIssueAnalysisWorkspaceSlug, null, analysisPrompt);
 
         if (!analysisResult) {
             throw new Error('The AI assistant did not provide an analysis for the issue.');
@@ -810,7 +814,7 @@ export async function handleGithubPrReview(commandArgs, { channelId, replyTarget
         return;
     }
 
-    if (!config.githubPrReviewWorkspaceSlug) {
+    if (!githubPrReviewWorkspaceSlug) {
         logger.warn(logContext, 'GitHub PR review workspace (githubPrReviewWorkspaceSlug) is not configured.');
         await slackWebClient.chat.postMessage({ channel: channelId, thread_ts: replyTarget, text: 'GitHub PR review feature is not configured.' });
         return;
@@ -850,7 +854,7 @@ export async function handleGithubPrReview(commandArgs, { channelId, replyTarget
         if (!prFiles) logger.warn({ ...logContext }, 'Could not fetch PR file list.');
         if (!prDiff) logger.warn({ ...logContext }, 'Could not fetch PR diff.');
 
-        // 4. Prepare prompt and call LLM
+        // 4. Prepare prompt and call LLM (use direct variable)
         // Truncate diff to avoid excessive length/cost
         const MAX_DIFF_LENGTH = 5000; // Configurable?
         const truncatedDiff = prDiff ? (prDiff.length > MAX_DIFF_LENGTH ? prDiff.substring(0, MAX_DIFF_LENGTH) + '\n... (diff truncated) ...' : prDiff) : '(Diff not available)';
@@ -868,7 +872,7 @@ export async function handleGithubPrReview(commandArgs, { channelId, replyTarget
         const reviewPrompt = `Perform a brief code review of the following Pull Request based on the provided information. Focus on potential bugs, style issues, and areas for improvement. Provide a concise summary of your findings.\\n\\nPR URL: ${prDetails.url}\\n\\n${prContent}\\n\\nReview Summary:`;
 
         logger.debug({ ...logContext }, 'Calling LLM for PR review...');
-        const reviewResult = await queryLlm(config.githubPrReviewWorkspaceSlug, null, reviewPrompt);
+        const reviewResult = await queryLlm(githubPrReviewWorkspaceSlug, null, reviewPrompt);
 
         if (!reviewResult) {
             throw new Error('The AI assistant did not provide a review for the PR.');
@@ -881,7 +885,7 @@ export async function handleGithubPrReview(commandArgs, { channelId, replyTarget
         await slackWebClient.chat.postMessage({
             channel: channelId,
             thread_ts: replyTarget,
-            text: `AI Review for ${owner}/${repo}#${prNumber}`, // Fallback
+            text: responseText,
             blocks: richTextBlock ? [richTextBlock] : undefined
         });
 
@@ -909,5 +913,3 @@ export async function handleGithubPrReview(commandArgs, { channelId, replyTarget
         }
     }
 }
-
-// TODO: Implement handleGithubPrefixedCommand 

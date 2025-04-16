@@ -1,6 +1,12 @@
 // Service for determining and caching AnythingLLM workspaces
 import logger from '../logger.js';
-import { config } from '../config.js';
+// REMOVED: import { config } from '../config.js';
+import {
+    enableUserWorkspaces, 
+    userWorkspaceMapping, 
+    workspaceMapping, 
+    fallbackWorkspace 
+} from '../config.js'; // Import specific config vars
 // import { getWorkspaces as fetchWorkspacesFromLLM } from '../llm.js'; // Assuming the raw fetch function is here
 
 // TODO: Implement robust caching (in-memory with TTL, potentially Redis for multi-instance)
@@ -56,9 +62,9 @@ export async function determineWorkspace({ suggestedWorkspace, userId, channelId
     return suggestedWorkspace;
   }
 
-  // 2. Check user-specific mapping (if enabled)
-  if (config.enableUserWorkspaces && config.userWorkspaceMapping?.[userId]) {
-      const userMappedSlug = config.userWorkspaceMapping[userId];
+  // 2. Check user-specific mapping (if enabled) - Use direct variables
+  if (enableUserWorkspaces && userWorkspaceMapping?.[userId]) {
+      const userMappedSlug = userWorkspaceMapping[userId];
       if (availableSlugs.includes(userMappedSlug)) {
           logger.debug({ workspace: userMappedSlug, userId }, 'Using user-mapped workspace');
           return userMappedSlug;
@@ -67,17 +73,17 @@ export async function determineWorkspace({ suggestedWorkspace, userId, channelId
       }
   }
 
-  // 3. Check channel/workspace mapping
-  const channelMappedSlug = config.workspaceMapping?.[channelId];
+  // 3. Check channel/workspace mapping - Use direct variable
+  const channelMappedSlug = workspaceMapping?.[channelId];
   if (channelMappedSlug && availableSlugs.includes(channelMappedSlug)) {
     logger.debug({ workspace: channelMappedSlug, channelId }, 'Using channel-mapped workspace');
     return channelMappedSlug;
   }
 
-  // 4. Use fallback workspace
-  if (config.fallbackWorkspace && availableSlugs.includes(config.fallbackWorkspace)) {
-    logger.debug({ workspace: config.fallbackWorkspace }, 'Using fallback workspace');
-    return config.fallbackWorkspace;
+  // 4. Use fallback workspace - Use direct variable
+  if (fallbackWorkspace && availableSlugs.includes(fallbackWorkspace)) {
+    logger.debug({ workspace: fallbackWorkspace }, 'Using fallback workspace');
+    return fallbackWorkspace;
   }
 
   logger.warn({ userId, channelId, suggestedWorkspace }, 'Could not determine a valid workspace, no workspace will be used.');

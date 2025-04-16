@@ -1,6 +1,6 @@
 // Handles incoming Slack interactions (slash commands, button clicks)
 import logger from '../logger.js';
-import { config, botUserId } from '../config.js'; // Assuming config is available
+import { botUserId, feedbackEnabled, githubFeaturesEnabled } from '../config.js';
 import {
     redisClient,
     isRedisReady,
@@ -146,7 +146,7 @@ export async function handleInteraction(payload, slackWebClient) {
             // --- Handle Feedback Buttons ---
             } else if (actionId.startsWith('feedback_')) {
                 logger.info({ ...logContext, actionId }, 'Handling feedback action');
-                if (!config.feedbackEnabled) {
+                if (!feedbackEnabled) {
                     logger.warn({ ...logContext, actionId }, 'Feedback received but feature is disabled.');
                     return; // Ignore if feedback is disabled
                 }
@@ -285,8 +285,8 @@ export async function handleInteraction(payload, slackWebClient) {
                         });
                     } catch (e) { logger.error({ ...githubLogContext, error: e }, 'Failed to send ephemeral ack for /github'); }
 
-                    // Check feature flag before calling handlers
-                    if (!config.githubFeaturesEnabled) {
+                    // Check feature flag before calling handlers - Use direct variable
+                    if (!githubFeaturesEnabled) {
                          logger.warn(githubLogContext, 'GitHub features disabled, ignoring /github command.');
                          // Maybe update the ephemeral message? Requires response_url or further logic.
                          return;

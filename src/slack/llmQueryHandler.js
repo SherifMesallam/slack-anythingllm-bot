@@ -1,6 +1,6 @@
 // Handler for general LLM queries
 import logger from '../logger.js';
-import { config, botUserId, feedbackEnabled, MIN_SUBSTANTIVE_RESPONSE_LENGTH } from '../config.js';
+import { botUserId, feedbackEnabled, MIN_SUBSTANTIVE_RESPONSE_LENGTH } from '../config.js';
 import { determineWorkspace } from '../services/workspaceService.js'; // Import workspace determination
 import { getAnythingLLMThreadMapping, storeAnythingLLMThreadMapping } from '../services.js'; // Assuming DB functions are still in services.js
 import { queryLlm, createNewAnythingLLMThread } from '../llm.js';
@@ -302,4 +302,4 @@ export async function handleLlmQuery({
         }
         endTimer(llmHandlerStartTime, 'handleLlmQuery (total)', logContext);
     }
-} 
+}
