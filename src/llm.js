@@ -7,7 +7,8 @@ import {
     redisUrl
 } from './config.js';
 import { redisClient, isRedisReady } from './services.js';
-import { logger } from './logger.js';
+// Use default import for the logger
+import logger from './logger.js';
 
 // Cache for available workspace slugs
 let availableWorkspacesCache = null;
