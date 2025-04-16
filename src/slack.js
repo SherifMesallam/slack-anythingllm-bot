@@ -346,7 +346,10 @@ async function handleSlackMessageEventInternal(event) {
 						'stripe': 'gravityformsstripe',
 						'authorize.net': 'gravityformsauthorizenet',
 						'user registration': 'gravityformsuserregistration',
-						'core': 'gravityforms'
+						'core': 'gravityforms',
+						'apc': 'gravityformsadvancedpostcreation',
+						'flow': 'gravityflow',
+						'square': 'gravityformssquare',
 					};
 					if ( productName === 'gravityflow' ) {
 						repo = 'gravityflow';
@@ -404,13 +407,21 @@ async function handleSlackMessageEventInternal(event) {
 	}
 
 	// Check 2: PR Review Command
-	const prReviewRegex = /^review\s+pr\s+gravityforms\/([\w-]+)#(\d+)\s+#([\w-]+)/i;
+	const prReviewRegex = /^review\s+pr\s+gravityforms\/([\w-]+)#(\d+)(?:\s+#([\w-]+))?/i;
 	const prMatch = !releaseMatch && cleanedQuery.match( prReviewRegex );
 
 	if ( prMatch ) {
 		const subRepo = prMatch[1];
 		const prNumber = parseInt( prMatch[2], 10 );
-		const workspaceSlug = prMatch[3];
+		let workspaceSlug = prMatch[3];
+
+		if ( workspaceSlug !== undefined ) {
+			console.log(`Workspace Slug: ${workspaceSlug}`);
+			// ... do something with workspaceSlug
+		} else {
+			workspaceSlug = fallbackWorkspace;
+		}
+
 		console.log( `[Slack Handler] PR review triggered for PR gravityforms/${subRepo}#${prNumber} in workspace ${workspaceSlug}` );
 		let isGitHubCommand = true; // Mark this as a GitHub command
 
@@ -486,33 +497,33 @@ async function handleSlackMessageEventInternal(event) {
 				// Create detailed review prompt
 				const reviewPrompt = `You are performing a code review of this Pull Request. Please provide a comprehensive review that includes:
 
-1. Overview:
-   - Brief summary of the changes
-   - The main purpose of this PR
-   - Impact and scope of changes
-
-2. Code Analysis:
-   - Code quality and best practices
-   - Potential bugs or issues
-   - Performance implications
-   - Security considerations
-   - Test coverage
-
-3. Specific Recommendations:
-   - Concrete suggestions for improvements
-   - Alternative approaches if applicable
-   - Any missing documentation
-
-4. Summary:
-   - Overall assessment
-   - Key points that need attention
-   - Whether the PR is ready to merge
-
-Please be specific and provide examples when pointing out issues or suggesting improvements. If you see something good, mention that as well.
-
-Here's the PR context:
-
-${ prContext }`;
+					1. Overview:
+					   - Brief summary of the changes
+					   - The main purpose of this PR
+					   - Impact and scope of changes
+					
+					2. Code Analysis:
+					   - Code quality and best practices
+					   - Potential bugs or issues
+					   - Performance implications
+					   - Security considerations
+					   - Test coverage
+					
+					3. Specific Recommendations:
+					   - Concrete suggestions for improvements
+					   - Alternative approaches if applicable
+					   - Any missing documentation
+					
+					4. Summary:
+					   - Overall assessment
+					   - Key points that need attention
+					   - Whether the PR is ready to merge
+					
+					Please be specific and provide examples when pointing out issues or suggesting improvements. If you see something good, mention that as well.
+					
+					Here's the PR context:
+					
+					${ prContext }`;
 
 				// Query LLM with the workspace from the command
 				console.log( `[Slack Handler] Requesting LLM analysis for PR #${ prNumber } in workspace ${ workspaceSlug }` );
@@ -566,624 +577,702 @@ ${ prContext }`;
 				return;
 			}
 		}
+	}
 
-		// Check 3: Issue Analysis
-		const issueTriggerRegex = /^(analyze|summarize|explain|check|look into)\s+(issue|backlog)\s+#(\d+)/i;
-		// --- DEBUG LOGGING ---
-		console.log( `[Slack Handler DEBUG] cleanedQuery for regex match: \"${ cleanedQuery }\"` );
-		// --- END DEBUG LOGGING ---
-		const issueTriggerMatch = ! releaseMatch && cleanedQuery.match( issueTriggerRegex ); // Only match if releaseMatch failed
-		// --- DEBUG LOGGING ---
-		console.log( `[Slack Handler DEBUG] issueTriggerMatch result:`, issueTriggerMatch );
-		// --- END DEBUG LOGGING ---
+	// Check 3: Issue Analysis
+	const issueTriggerRegex = /^(analyze|summarize|explain|check|look into)\s+(issue|backlog)\s+#(\d+)/i;
+	// --- DEBUG LOGGING ---
+	console.log( `[Slack Handler DEBUG] cleanedQuery for regex match: \"${ cleanedQuery }\"` );
+	// --- END DEBUG LOGGING ---
+	const issueTriggerMatch = ! releaseMatch && cleanedQuery.match( issueTriggerRegex ); // Only match if releaseMatch failed
+	// --- DEBUG LOGGING ---
+	console.log( `[Slack Handler DEBUG] issueTriggerMatch result:`, issueTriggerMatch );
+	// --- END DEBUG LOGGING ---
 
-		if ( issueTriggerMatch ) {
-			const issueNumber = parseInt( issueTriggerMatch[ 3 ], 10 );
-			const userPrompt = cleanedQuery.substring( issueTriggerMatch[ 0 ].length ).trim();
-			console.log( `[Slack Handler] GitHub issue analysis triggered for backlog #${ issueNumber }. User prompt: "${ userPrompt }"` );
+	if ( issueTriggerMatch ) {
+		const issueNumber = parseInt( issueTriggerMatch[ 3 ], 10 );
+		const userPrompt = cleanedQuery.substring( issueTriggerMatch[ 0 ].length ).trim();
+		console.log( `[Slack Handler] GitHub issue analysis triggered for backlog #${ issueNumber }. User prompt: "${ userPrompt }"` );
 
-			// Check for GITHUB_TOKEN before proceeding
-			if ( ! githubToken ) {
-				console.error( "[Slack Handler] GITHUB_TOKEN is missing. Cannot perform issue analysis." );
-				await slack.chat.postMessage( {
-					channel,
-					thread_ts: replyTarget,
-					text: `Sorry, I can't analyze GitHub issues because the GITHUB_TOKEN is not configured.`
-				} ).catch( () => {
+		// Check for GITHUB_TOKEN before proceeding
+		if ( ! githubToken ) {
+			console.error( "[Slack Handler] GITHUB_TOKEN is missing. Cannot perform issue analysis." );
+			await slack.chat.postMessage( {
+				channel,
+				thread_ts: replyTarget,
+				text: `Sorry, I can't analyze GitHub issues because the GITHUB_TOKEN is not configured.`
+			} ).catch( () => {
+			} );
+			const ts = await thinkingMessagePromise;
+			if ( ts ) {
+				slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
 				} );
-				const ts = await thinkingMessagePromise;
-				if ( ts ) {
-					slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
+			}
+			return; // <<< HANDLED (CONFIG ERROR) RETURN
+		}
+
+		try {
+			await thinkingMessagePromise; // Ensure thinking message is posted
+			const issueDetails = await getGithubIssueDetails( issueNumber );
+
+			if ( issueDetails ) {
+				// ---> Start of issue analysis logic
+				let issueContext = `**GitHub Issue:** gravityforms/backlog#${ issueNumber }\n`;
+				issueContext += `**Title:** ${ issueDetails.title }\n`;
+				issueContext += `**URL:** <${ issueDetails.url }|View on GitHub>\n`;
+				issueContext += `**Body:**\n${ issueDetails.body || '(No body)' }\n\n`;
+				if ( issueDetails.comments && issueDetails.comments.length > 0 ) {
+					issueContext += `**Recent Comments:**\n`;
+					issueDetails.comments.forEach( comment => {
+						issueContext += `*${ comment.user }:* ${ comment.body.substring( 0, 300 ) }${ comment.body.length > 300 ? '...' : '' }\n---\n`;
 					} );
 				}
-				return; // <<< HANDLED (CONFIG ERROR) RETURN
-			}
-
-			try {
-				await thinkingMessagePromise; // Ensure thinking message is posted
-				const issueDetails = await getGithubIssueDetails( issueNumber );
-
-				if ( issueDetails ) {
-					// ---> Start of issue analysis logic
-					let issueContext = `**GitHub Issue:** gravityforms/backlog#${ issueNumber }\n`;
-					issueContext += `**Title:** ${ issueDetails.title }\n`;
-					issueContext += `**URL:** <${ issueDetails.url }|View on GitHub>\n`;
-					issueContext += `**Body:**\n${ issueDetails.body || '(No body)' }\n\n`;
-					if ( issueDetails.comments && issueDetails.comments.length > 0 ) {
-						issueContext += `**Recent Comments:**\n`;
-						issueDetails.comments.forEach( comment => {
-							issueContext += `*${ comment.user }:* ${ comment.body.substring( 0, 300 ) }${ comment.body.length > 300 ? '...' : '' }\n---\n`;
-						} );
+				console.log( `[Slack Handler] Requesting LLM summary for issue #${ issueNumber }` );
+				const summarizePrompt = `Summarize the core problem described in the following GitHub issue details from gravityforms/backlog#${ issueNumber }:\n\n${ issueContext }`;
+				// --- DEBUG LLM CALL 1 ---
+				console.log( `[Slack Handler DEBUG] Calling queryLlm (Summary). Workspace: ${ workspaceSlugForThread }, Thread: ${ anythingLLMThreadSlug }` );
+				// --- END DEBUG ---
+				const summaryResponse = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, summarizePrompt );
+				if ( ! summaryResponse ) throw new Error( 'LLM failed to provide a summary.' );
+				console.log( `[Slack Handler] Posting LLM summary for issue #${ issueNumber }` );
+				const summaryBlock = markdownToRichTextBlock( `*LLM Summary for issue #${ issueNumber }:*\n${ summaryResponse }` );
+				if ( summaryBlock ) {
+					await slack.chat.postMessage( {
+						channel,
+						thread_ts: replyTarget,
+						text: `Summary for issue #${ issueNumber }: ${ summaryResponse }`,
+						blocks: [ summaryBlock ]
+					} );
+				}
+				console.log( `[Slack Handler] Requesting LLM analysis for issue #${ issueNumber }` );
+				let analyzePrompt = `Based on your summary ("${ summaryResponse }") and the full context below, analyze issue gravityforms/backlog#${ issueNumber }`;
+				if ( userPrompt ) {
+					analyzePrompt += ` specifically addressing the following: "${ userPrompt }"`;
+				} else {
+					analyzePrompt += ` and suggest potential causes or solutions.`;
+				}
+				analyzePrompt += `\n\n**Full Context:**\n${ issueContext }`;
+				// --- DEBUG LLM CALL 2 ---
+				console.log( `[Slack Handler DEBUG] Calling queryLlm (Analysis). Workspace: ${ workspaceSlugForThread }, Thread: ${ anythingLLMThreadSlug }` );
+				// --- END DEBUG ---
+				const analysisResponse = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, analyzePrompt );
+				if ( ! analysisResponse ) throw new Error( 'LLM failed to provide analysis.' );
+				console.log( `[Slack Handler] Processing and sending LLM analysis for issue #${ issueNumber }` );
+				const segments = extractTextAndCode( analysisResponse );
+				for ( let i = 0; i < segments.length; i++ ) {
+					const blocksToSend = [];
+					const segment = segments[ i ];
+					if ( segment.type === 'text' ) {
+						const block = markdownToRichTextBlock( segment.content );
+						if ( block ) blocksToSend.push( block );
+					} else if ( segment.type === 'code' ) {
+						const block = markdownToRichTextBlock( `\`\`\`${ segment.language || '' }\n${ segment.content }\`\`\`` );
+						if ( block ) blocksToSend.push( block );
 					}
-					console.log( `[Slack Handler] Requesting LLM summary for issue #${ issueNumber }` );
-					const summarizePrompt = `Summarize the core problem described in the following GitHub issue details from gravityforms/backlog#${ issueNumber }:\n\n${ issueContext }`;
-					// --- DEBUG LLM CALL 1 ---
-					console.log( `[Slack Handler DEBUG] Calling queryLlm (Summary). Workspace: ${ workspaceSlugForThread }, Thread: ${ anythingLLMThreadSlug }` );
-					// --- END DEBUG ---
-					const summaryResponse = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, summarizePrompt );
-					if ( ! summaryResponse ) throw new Error( 'LLM failed to provide a summary.' );
-					console.log( `[Slack Handler] Posting LLM summary for issue #${ issueNumber }` );
-					const summaryBlock = markdownToRichTextBlock( `*LLM Summary for issue #${ issueNumber }:*\n${ summaryResponse }` );
-					if ( summaryBlock ) {
+					if ( blocksToSend.length > 0 ) {
 						await slack.chat.postMessage( {
 							channel,
 							thread_ts: replyTarget,
-							text: `Summary for issue #${ issueNumber }: ${ summaryResponse }`,
-							blocks: [ summaryBlock ]
+							text: `Analysis Part ${ i + 1 }`,
+							blocks: blocksToSend
 						} );
+						console.log( `[Slack Handler] Posted analysis segment ${ i + 1 }/${ segments.length }` );
 					}
-					console.log( `[Slack Handler] Requesting LLM analysis for issue #${ issueNumber }` );
-					let analyzePrompt = `Based on your summary ("${ summaryResponse }") and the full context below, analyze issue gravityforms/backlog#${ issueNumber }`;
-					if ( userPrompt ) {
-						analyzePrompt += ` specifically addressing the following: "${ userPrompt }"`;
-					} else {
-						analyzePrompt += ` and suggest potential causes or solutions.`;
-					}
-					analyzePrompt += `\n\n**Full Context:**\n${ issueContext }`;
-					// --- DEBUG LLM CALL 2 ---
-					console.log( `[Slack Handler DEBUG] Calling queryLlm (Analysis). Workspace: ${ workspaceSlugForThread }, Thread: ${ anythingLLMThreadSlug }` );
-					// --- END DEBUG ---
-					const analysisResponse = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, analyzePrompt );
-					if ( ! analysisResponse ) throw new Error( 'LLM failed to provide analysis.' );
-					console.log( `[Slack Handler] Processing and sending LLM analysis for issue #${ issueNumber }` );
-					const segments = extractTextAndCode( analysisResponse );
-					for ( let i = 0; i < segments.length; i++ ) {
-						const blocksToSend = [];
-						const segment = segments[ i ];
-						if ( segment.type === 'text' ) {
-							const block = markdownToRichTextBlock( segment.content );
-							if ( block ) blocksToSend.push( block );
-						} else if ( segment.type === 'code' ) {
-							const block = markdownToRichTextBlock( `\`\`\`${ segment.language || '' }\n${ segment.content }\`\`\`` );
-							if ( block ) blocksToSend.push( block );
-						}
-						if ( blocksToSend.length > 0 ) {
-							await slack.chat.postMessage( {
-								channel,
-								thread_ts: replyTarget,
-								text: `Analysis Part ${ i + 1 }`,
-								blocks: blocksToSend
-							} );
-							console.log( `[Slack Handler] Posted analysis segment ${ i + 1 }/${ segments.length }` );
-						}
-					}
-					// ---> End of issue analysis logic
-
-					// Cleanup thinking message and return successfully
-					const ts = await thinkingMessagePromise;
-					if ( ts ) {
-						slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
-						} );
-					}
-					return; // <<< SUCCESSFUL RETURN
-				} else {
-					// Handle case where issue details couldn't be fetched
-					await slack.chat.postMessage( {
-						channel,
-						thread_ts: replyTarget,
-						text: `I couldn't fetch details for backlog issue #${ issueNumber }. Please check if the number is correct and the GITHUB_TOKEN is valid.`
-					} );
-					const ts = await thinkingMessagePromise;
-					if ( ts ) {
-						slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
-						} );
-					}
-					return; // <<< HANDLED (NOT FOUND) RETURN
 				}
-			} catch ( error ) {
-				console.error( `[Slack Handler] Error during GitHub issue analysis for #${ issueNumber }:`, error );
+				// ---> End of issue analysis logic
+
+				// Cleanup thinking message and return successfully
+				const ts = await thinkingMessagePromise;
+				if ( ts ) {
+					slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
+					} );
+				}
+				return; // <<< SUCCESSFUL RETURN
+			} else {
+				// Handle case where issue details couldn't be fetched
 				await slack.chat.postMessage( {
 					channel,
 					thread_ts: replyTarget,
-					text: `Sorry, I encountered an error trying to analyze issue #${ issueNumber }.`
-				} ).catch( () => {
+					text: `I couldn't fetch details for backlog issue #${ issueNumber }. Please check if the number is correct and the GITHUB_TOKEN is valid.`
 				} );
 				const ts = await thinkingMessagePromise;
 				if ( ts ) {
 					slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
 					} );
 				}
-				return; // <<< HANDLED (ERROR) RETURN
+				return; // <<< HANDLED (NOT FOUND) RETURN
 			}
+		} catch ( error ) {
+			console.error( `[Slack Handler] Error during GitHub issue analysis for #${ issueNumber }:`, error );
+			await slack.chat.postMessage( {
+				channel,
+				thread_ts: replyTarget,
+				text: `Sorry, I encountered an error trying to analyze issue #${ issueNumber }.`
+			} ).catch( () => {
+			} );
+			const ts = await thinkingMessagePromise;
+			if ( ts ) {
+				slack.chat.delete( { channel: channel, ts: ts } ).catch( () => {
+				} );
+			}
+			return; // <<< HANDLED (ERROR) RETURN
 		}
+	}
 
-		// --- GitHub API Command ---
-		const isGithubCommand = cleanedQuery.toLowerCase().startsWith( 'github' ) || cleanedQuery.includes( '#github' );
-		if ( isGithubCommand && githubWorkspaceSlug ) {
-			console.log( `[GitHub API] Trigger detected for text: \"${ cleanedQuery }\"` );
+	// --- GitHub API Command ---
+	const isGithubCommand = cleanedQuery.toLowerCase().startsWith( 'github' ) || cleanedQuery.includes( '#github' );
+	if ( isGithubCommand && githubWorkspaceSlug ) {
+		console.log( `[GitHub API] Trigger detected for text: \"${ cleanedQuery }\"` );
 
-			const githubQuery = cleanedQuery.replace( /^github/i, '' ).replace( /#github/g, '' ).trim();
-			console.log( `[GitHub API] Querying GitHub workspace with: \"${ githubQuery }\"` );
+		const githubQuery = cleanedQuery.replace( /^github/i, '' ).replace( /#github/g, '' ).trim();
+		console.log( `[GitHub API] Querying GitHub workspace with: \"${ githubQuery }\"` );
 
+		try {
+			// Changed mode from 'query' to 'chat'
+			const llmResponse = await queryLlm( githubWorkspaceSlug, null, githubQuery, 'chat', [] );
+			console.log( '[GitHub API] Raw LLM Response:', JSON.stringify( llmResponse, null, 2 ) );
+
+			if ( ! llmResponse ) { // Check if llmResponse itself is null/undefined
+				throw new Error( 'Received null or invalid response from GitHub workspace LLM.' );
+			}
+
+			// Ensure the response is treated as text, even if null initially
+			const responseText = llmResponse || '';
+
+			// --- Clean the response text: Remove markdown code fences --- START
+			let cleanedJsonString = responseText.trim();
+			if ( cleanedJsonString.startsWith( '```json' ) ) {
+				cleanedJsonString = cleanedJsonString.substring( 7 ); // Remove ```json
+			}
+			if ( cleanedJsonString.startsWith( '```' ) ) { // Handle case with just ```
+				cleanedJsonString = cleanedJsonString.substring( 3 );
+			}
+			if ( cleanedJsonString.endsWith( '```' ) ) {
+				cleanedJsonString = cleanedJsonString.substring( 0, cleanedJsonString.length - 3 );
+			}
+			cleanedJsonString = cleanedJsonString.trim(); // Trim again after removing fences
+			// --- Clean the response text: Remove markdown code fences --- END
+
+			let apiDetails;
 			try {
-				// Changed mode from 'query' to 'chat'
-				const llmResponse = await queryLlm( githubWorkspaceSlug, null, githubQuery, 'chat', [] );
-				console.log( '[GitHub API] Raw LLM Response:', JSON.stringify( llmResponse, null, 2 ) );
-
-				if ( ! llmResponse ) { // Check if llmResponse itself is null/undefined
-					throw new Error( 'Received null or invalid response from GitHub workspace LLM.' );
-				}
-
-				// Ensure the response is treated as text, even if null initially
-				const responseText = llmResponse || '';
-
-				// --- Clean the response text: Remove markdown code fences --- START
-				let cleanedJsonString = responseText.trim();
-				if ( cleanedJsonString.startsWith( '```json' ) ) {
-					cleanedJsonString = cleanedJsonString.substring( 7 ); // Remove ```json
-				}
-				if ( cleanedJsonString.startsWith( '```' ) ) { // Handle case with just ```
-					cleanedJsonString = cleanedJsonString.substring( 3 );
-				}
-				if ( cleanedJsonString.endsWith( '```' ) ) {
-					cleanedJsonString = cleanedJsonString.substring( 0, cleanedJsonString.length - 3 );
-				}
-				cleanedJsonString = cleanedJsonString.trim(); // Trim again after removing fences
-				// --- Clean the response text: Remove markdown code fences --- END
-
-				let apiDetails;
-				try {
-					// Attempt to parse the cleaned string
-					if ( cleanedJsonString === '' ) throw new Error( 'LLM response text was empty after cleaning.' );
-					apiDetails = JSON.parse( cleanedJsonString );
-				} catch ( parseError ) {
-					console.error( '[GitHub API] Failed to parse cleaned LLM response as JSON:', parseError );
-					console.error( '[GitHub API] Original response text:', responseText ); // Log original for debugging
-					console.error( '[GitHub API] Cleaned string before parse attempt:', cleanedJsonString );
-					await slack.chat.postMessage( {
-						channel: channel,
-						thread_ts: replyTarget,
-						// Show the *original* raw response in the error message
-						text: `⚠️ Sorry, I couldn't understand the API instructions from the GitHub knowledge base. The response wasn't valid JSON even after cleaning.\n\nRaw response: \`\`\`${ responseText }\`\`\``
-					} );
-					return;
-				}
-
-				// Call the GitHub API
-				try { // Outer try for GitHub API call AND subsequent processing
-					console.log( "[GitHub API] Calling GitHub API with details:", apiDetails );
-					const githubResponse = await callGithubApi( apiDetails );
-					console.log( "[GitHub API] Received response from GitHub." );
-
-					// --- Format the response --- START
-					let finalResponseText = ''; // Initialize final response text
-					const rawJsonString = JSON.stringify( githubResponse, null, 2 ); // Stringify once for potential reuse
-
-					if ( formatterWorkspaceSlug ) {
-						// Try to format using the formatter workspace
-						console.log( `[GitHub API] Formatting response using workspace: ${ formatterWorkspaceSlug }` );
-						const formatPrompt = rawJsonString; // Send the stringified JSON
-						console.log( `[GitHub API] Sending stringified JSON to formatter (length: ${ formatPrompt.length })` );
-
-						try { // Inner try for Formatter LLM call
-							const formattedLLMResponse = await queryLlm( formatterWorkspaceSlug, null, formatPrompt, 'chat', [] );
-							// Handle null/undefined/empty/whitespace responses robustly
-							const trimmedResponse = formattedLLMResponse ? formattedLLMResponse.trim() : '';
-
-							if ( trimmedResponse.length > 0 ) {
-								let rawFormatted = trimmedResponse;
-								console.log( "[GitHub API] Successfully received formatted response (before cleaning)." );
-
-								// --- Clean the FORMATTED response text: Remove markdown code fences --- START
-								let cleanedFormattedResponse = rawFormatted;
-								if ( cleanedFormattedResponse.startsWith( '```markdown' ) ) {
-									cleanedFormattedResponse = cleanedFormattedResponse.substring( 11 );
-								} else if ( cleanedFormattedResponse.startsWith( '```' ) ) {
-									cleanedFormattedResponse = cleanedFormattedResponse.substring( 3 );
-								}
-								if ( cleanedFormattedResponse.endsWith( '```' ) ) {
-									cleanedFormattedResponse = cleanedFormattedResponse.substring( 0, cleanedFormattedResponse.length - 3 );
-								}
-								finalResponseText = cleanedFormattedResponse.trim(); // Assign cleaned text
-								console.log( "[GitHub API] Cleaned formatted response before sending to Slack." );
-								// --- Clean the FORMATTED response text: Remove markdown code fences --- END
-							} else {
-								console.warn( "[GitHub API] Formatter LLM returned an empty or null response. Falling back to raw JSON." );
-								// Use standard string literal for fallback
-								finalResponseText = `(Formatter failed or returned empty, showing raw data):\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
-							}
-						} catch ( formatError ) { // Catch for Formatter LLM call
-							console.error( '[GitHub API] Error calling formatter LLM:', formatError );
-							// Use template literal for error message
-							finalResponseText = `(Error during formatting: ${ formatError.message })\n\nRaw data:\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
-						} // End catch for Formatter LLM call
-
-					} else {
-						// No formatter configured, use raw JSON
-						console.log( "[GitHub API] No formatter workspace configured. Sending raw JSON." );
-						// Use template literal for raw response message
-						finalResponseText = `Here is the raw response from the GitHub API:\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
-					}
-					// --- Format the response --- END
-
-					// --- Post the final (formatted or raw) response back to Slack (Chunked) --- START
-					console.log( "[GitHub API] Splitting final response for Slack." );
-					// Use the general text length limit for splitting the potentially formatted response
-					const chunks = splitMessageIntoChunks( finalResponseText, MAX_SLACK_BLOCK_TEXT_LENGTH );
-					console.log( `[GitHub API] Split into ${ chunks.length } chunk(s).` );
-
-					for ( let i = 0; i < chunks.length; i++ ) {
-						const chunk = chunks[ i ];
-						console.log( `[GitHub API] Processing chunk ${ i + 1 }/${ chunks.length }` );
-						const responseBlock = markdownToRichTextBlock( chunk );
-						if ( responseBlock ) {
-							await slack.chat.postMessage( {
-								channel: channel,
-								thread_ts: replyTarget,
-								text: chunk.substring( 0, 200 ), // Use start of chunk text as fallback
-								blocks: [ responseBlock ]
-							} );
-						} else {
-							// Fallback to plain text if block generation fails for a chunk
-							console.warn( `[GitHub API] Failed to generate block for chunk ${ i + 1 }. Sending plain text.` );
-							await slack.chat.postMessage( {
-								channel: channel,
-								thread_ts: replyTarget,
-								text: chunk
-							} );
-						}
-						// Add a small delay between posting chunks to avoid rate limits and improve readability
-						if ( chunks.length > 1 && i < chunks.length - 1 ) {
-							await new Promise( resolve => setTimeout( resolve, 500 ) ); // 500ms delay
-						}
-					}
-					console.log( "[GitHub API] Finished posting all chunks." );
-					// --- Post the final (formatted or raw) response back to Slack (Chunked) --- END
-
-					// --- Cleanup Thinking Message --- START
-					try {
-						const tsToDelete = await thinkingMessagePromise; // Ensure promise is resolved
-						if ( tsToDelete ) {
-							console.log( `[GitHub API] Deleting thinking message (ts: ${ tsToDelete }).` );
-							await slack.chat.delete( { channel: channel, ts: tsToDelete } );
-						}
-					} catch ( deleteError ) {
-						console.warn( "[GitHub API] Failed to delete thinking message:", deleteError.data?.error || deleteError.message );
-					}
-					// --- Cleanup Thinking Message --- END
-
-				} catch ( apiError ) { // Catch errors specifically from the GitHub API call
-					console.error( '[GitHub API] Error calling GitHub API:', apiError );
-
-					// Attempt to report the API error back to Slack
-					// This *also* needs its own try-catch in case Slack is unreachable
-					try {
-						await slack.chat.postMessage( {
-							channel: channel,
-							thread_ts: replyTarget,
-							text: `Sorry, I encountered an error while calling the GitHub API: ${ apiError.message }`
-						} );
-					} catch ( slackErrorWhileReportingApiError ) {
-						console.error( '[GitHub API] CRITICAL: Failed to call GitHub API AND failed to report the error to Slack:', slackErrorWhileReportingApiError );
-						console.error( '[GitHub API] Original API Error was:', apiError ); // Ensure original error is logged
-					}
-				}
-
-			} catch ( llmError ) {
-				console.error( '[GitHub API] Error querying GitHub workspace LLM:', llmError );
+				// Attempt to parse the cleaned string
+				if ( cleanedJsonString === '' ) throw new Error( 'LLM response text was empty after cleaning.' );
+				apiDetails = JSON.parse( cleanedJsonString );
+			} catch ( parseError ) {
+				console.error( '[GitHub API] Failed to parse cleaned LLM response as JSON:', parseError );
+				console.error( '[GitHub API] Original response text:', responseText ); // Log original for debugging
+				console.error( '[GitHub API] Cleaned string before parse attempt:', cleanedJsonString );
 				await slack.chat.postMessage( {
 					channel: channel,
 					thread_ts: replyTarget,
-					text: `Sorry, I encountered an error while trying to figure out the GitHub API call: ${ llmError.message }`
+					// Show the *original* raw response in the error message
+					text: `⚠️ Sorry, I couldn't understand the API instructions from the GitHub knowledge base. The response wasn't valid JSON even after cleaning.\n\nRaw response: \`\`\`${ responseText }\`\`\``
 				} );
+				return;
 			}
-			return; // Stop processing after handling GitHub command
-		}
 
-		// If neither command was handled and returned, proceed to main logic
-		console.log( "[Slack Handler] No direct answer command detected, proceeding to main LLM." );
+			// Call the GitHub API
+			try { // Outer try for GitHub API call AND subsequent processing
+				console.log( "[GitHub API] Calling GitHub API with details:", apiDetails );
+				const githubResponse = await callGithubApi( apiDetails );
+				console.log( "[GitHub API] Received response from GitHub." );
 
-		// --- End Direct Answer / Special Command Handling ---
+				// --- Format the response --- START
+				let finalResponseText = ''; // Initialize final response text
+				const rawJsonString = JSON.stringify( githubResponse, null, 2 ); // Stringify once for potential reuse
 
-		// --- Main Processing Logic (Only runs if no direct answer/command was handled and returned) ---
-		// Thread/workspace slugs are already determined above
-		try {
-			// Update Thinking Message (if thinking message promise resolved successfully)
-			const messageTs = await thinkingMessagePromise;
-			if ( messageTs ) {
-				thinkingMessageTs = messageTs; // Ensure the variable is set for later cleanup
-				try {
-					const thinkingMessages = [
-						":rocket: Blasting off to knowledge orbit...",
-						":alien: Consulting my alien overlords...",
-						":milky_way: Searching the cosmic database...",
-						":satellite: Sending signals to distant star systems...",
-						":ringed_planet: Circling Saturn for answers...",
-						":full_moon: Moonwalking through data...",
-						":dizzy: Getting lost in a black hole of information...",
-						":flying_saucer: Abducting relevant facts...",
-						":astronaut: Spacewalking through code repositories...",
-						":stars: Counting stars while the database loads...",
-						":rocket: Houston, we're solving a problem...",
-						":comet: Riding this comet to find your answer...",
-						":telescope: Peering into the knowledge universe...",
-						":robot_face: Engaging hyperdrive processors...",
-						":shooting_star: Wishing upon a star for good results...",
-						":new_moon: That's no moon, it's a data station...",
-						":sun_with_face: Harvesting solar energy for processing power...",
-						":space_invader: Zapping knowledge barriers...",
-						":satellite_antenna: Receiving signals from mission control...",
-						":meteor: Entering knowledge atmosphere at high velocity..."
-					];
-					const thinkingText = thinkingMessages[ Math.floor( Math.random() * thinkingMessages.length ) ];
-					await slack.chat.update( {
-						channel,
-						ts: thinkingMessageTs,
-						text: thinkingText
-					} );
-					console.log( `[Slack Handler] Updated thinking message (ts: ${ thinkingMessageTs }) to: "${ thinkingText }"` );
-				} catch ( updateError ) {
-					console.warn( `[Slack Handler] Failed update thinking message:`, updateError.data?.error || updateError.message );
+				if ( formatterWorkspaceSlug ) {
+					// Try to format using the formatter workspace
+					console.log( `[GitHub API] Formatting response using workspace: ${ formatterWorkspaceSlug }` );
+					const formatPrompt = rawJsonString; // Send the stringified JSON
+					console.log( `[GitHub API] Sending stringified JSON to formatter (length: ${ formatPrompt.length })` );
+
+					try { // Inner try for Formatter LLM call
+						const formattedLLMResponse = await queryLlm( formatterWorkspaceSlug, null, formatPrompt, 'chat', [] );
+						// Handle null/undefined/empty/whitespace responses robustly
+						const trimmedResponse = formattedLLMResponse ? formattedLLMResponse.trim() : '';
+
+						if ( trimmedResponse.length > 0 ) {
+							let rawFormatted = trimmedResponse;
+							console.log( "[GitHub API] Successfully received formatted response (before cleaning)." );
+
+							// --- Clean the FORMATTED response text: Remove markdown code fences --- START
+							let cleanedFormattedResponse = rawFormatted;
+							if ( cleanedFormattedResponse.startsWith( '```markdown' ) ) {
+								cleanedFormattedResponse = cleanedFormattedResponse.substring( 11 );
+							} else if ( cleanedFormattedResponse.startsWith( '```' ) ) {
+								cleanedFormattedResponse = cleanedFormattedResponse.substring( 3 );
+							}
+							if ( cleanedFormattedResponse.endsWith( '```' ) ) {
+								cleanedFormattedResponse = cleanedFormattedResponse.substring( 0, cleanedFormattedResponse.length - 3 );
+							}
+							finalResponseText = cleanedFormattedResponse.trim(); // Assign cleaned text
+							console.log( "[GitHub API] Cleaned formatted response before sending to Slack." );
+							// --- Clean the FORMATTED response text: Remove markdown code fences --- END
+						} else {
+							console.warn( "[GitHub API] Formatter LLM returned an empty or null response. Falling back to raw JSON." );
+							// Use standard string literal for fallback
+							finalResponseText = `(Formatter failed or returned empty, showing raw data):\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
+						}
+					} catch ( formatError ) { // Catch for Formatter LLM call
+						console.error( '[GitHub API] Error calling formatter LLM:', formatError );
+						// Use template literal for error message
+						finalResponseText = `(Error during formatting: ${ formatError.message })\n\nRaw data:\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
+					} // End catch for Formatter LLM call
+
+				} else {
+					// No formatter configured, use raw JSON
+					console.log( "[GitHub API] No formatter workspace configured. Sending raw JSON." );
+					// Use template literal for raw response message
+					finalResponseText = `Here is the raw response from the GitHub API:\n\`\`\`json\n${ rawJsonString }\n\`\`\``;
 				}
-			}
+				// --- Format the response --- END
 
-			// 8. Construct LLM Input (Just the query)
-			let llmInputText = cleanedQuery; // Start with the base query
-			let threadHistory = "";
-			if (wasMentioned && threadTs) {
-				threadHistory = await fetchConversationHistory(channel, threadTs, originalTs, isDM);
-				console.log('[Slack Handler] Thread history fetched:', threadHistory ? 'Yes' : 'No');
-				if (threadHistory) {
-					cleanedQuery = `${threadHistory}\n\nLatest question: ${cleanedQuery}`;
-				}
-			}
-			// --- Add instruction for non-GitHub queries --- START
-			console.log( "[Slack Handler] This is NOT a GitHub command, adding LLM instructions." );
-			const instruction = '\n\nIMPORTANT: Please do not include context references (like "CONTEXT 0", "CONTEXT 1", etc.) in your response. Provide a clean, professional answer without these annotations.';
-			llmInputText += instruction;
-			// --- Add instruction for non-GitHub queries --- END
+				// --- Post the final (formatted or raw) response back to Slack (Chunked) --- START
+				console.log( "[GitHub API] Splitting final response for Slack." );
+				// Use the general text length limit for splitting the potentially formatted response
+				const chunks = splitMessageIntoChunks( finalResponseText, MAX_SLACK_BLOCK_TEXT_LENGTH );
+				console.log( `[GitHub API] Split into ${ chunks.length } chunk(s).` );
 
-			console.log( `[Slack Handler] Sending query to AnythingLLM Thread ${ workspaceSlugForThread }:${ anythingLLMThreadSlug }...` );
-
-			// 9. Query LLM using thread endpoint
-			const llmStartTime = Date.now();
-			const rawReply = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, llmInputText );
-			console.log( `[Slack Handler] LLM call duration: ${ Date.now() - llmStartTime }ms` );
-			if ( ! rawReply ) throw new Error( 'LLM returned empty response.' );
-			console.log( "[Slack Handler Debug] Raw LLM Reply:\n", rawReply );
-
-			// 10. Process and Send Response
-
-			// 10a. Refined Check for Substantive Response
-			let isSubstantiveResponse = true;
-			const lowerRawReplyTrimmed = rawReply.toLowerCase().trim();
-
-			// Rule 1: Check length first
-			if ( lowerRawReplyTrimmed.length < MIN_SUBSTANTIVE_RESPONSE_LENGTH ) {
-				console.log( `[Slack Handler] Reply is short (${ lowerRawReplyTrimmed.length } < ${ MIN_SUBSTANTIVE_RESPONSE_LENGTH }). Skipping feedback buttons.` );
-				isSubstantiveResponse = false;
-			}
-
-			// Rule 2: Check for exact, simple non-substantive replies (only if still substantive)
-			if ( isSubstantiveResponse ) {
-				const exactNonSubstantive = [
-					'ok', 'done', 'hello', 'hi', 'hey', 'thanks', 'thank you'
-				];
-				if ( exactNonSubstantive.includes( lowerRawReplyTrimmed ) ) {
-					console.log( `[Slack Handler] Exact non-substantive match found: "${ lowerRawReplyTrimmed }". Skipping feedback buttons.` );
-					isSubstantiveResponse = false;
-				}
-			}
-
-			// Rule 3: Check if the reply STARTS WITH common refusal or filler phrases (only if still substantive)
-			if ( isSubstantiveResponse ) {
-				const startingNonSubstantive = [
-					'sorry', 'i cannot', 'i am unable', "i don't know", "i do not know", 'i have no information',
-					'how can i help', 'conversation reset', 'context will be ignored',
-					'hello ', 'hi ', 'hey ', // Keep space for greetings followed by more
-					'encountered an error'
-				];
-				for ( const pattern of startingNonSubstantive ) {
-					if ( lowerRawReplyTrimmed.startsWith( pattern ) ) {
-						console.log( `[Slack Handler] Non-substantive starting pattern found: "${ pattern }". Skipping feedback buttons.` );
-						isSubstantiveResponse = false;
-						break;
+				for ( let i = 0; i < chunks.length; i++ ) {
+					const chunk = chunks[ i ];
+					console.log( `[GitHub API] Processing chunk ${ i + 1 }/${ chunks.length }` );
+					const responseBlock = markdownToRichTextBlock( chunk );
+					if ( responseBlock ) {
+						await slack.chat.postMessage( {
+							channel: channel,
+							thread_ts: replyTarget,
+							text: chunk.substring( 0, 200 ), // Use start of chunk text as fallback
+							blocks: [ responseBlock ]
+						} );
+					} else {
+						// Fallback to plain text if block generation fails for a chunk
+						console.warn( `[GitHub API] Failed to generate block for chunk ${ i + 1 }. Sending plain text.` );
+						await slack.chat.postMessage( {
+							channel: channel,
+							thread_ts: replyTarget,
+							text: chunk
+						} );
+					}
+					// Add a small delay between posting chunks to avoid rate limits and improve readability
+					if ( chunks.length > 1 && i < chunks.length - 1 ) {
+						await new Promise( resolve => setTimeout( resolve, 500 ) ); // 500ms delay
 					}
 				}
+				console.log( "[GitHub API] Finished posting all chunks." );
+				// --- Post the final (formatted or raw) response back to Slack (Chunked) --- END
+
+				// --- Cleanup Thinking Message --- START
+				try {
+					const tsToDelete = await thinkingMessagePromise; // Ensure promise is resolved
+					if ( tsToDelete ) {
+						console.log( `[GitHub API] Deleting thinking message (ts: ${ tsToDelete }).` );
+						await slack.chat.delete( { channel: channel, ts: tsToDelete } );
+					}
+				} catch ( deleteError ) {
+					console.warn( "[GitHub API] Failed to delete thinking message:", deleteError.data?.error || deleteError.message );
+				}
+				// --- Cleanup Thinking Message --- END
+
+			} catch ( apiError ) { // Catch errors specifically from the GitHub API call
+				console.error( '[GitHub API] Error calling GitHub API:', apiError );
+
+				// Attempt to report the API error back to Slack
+				// This *also* needs its own try-catch in case Slack is unreachable
+				try {
+					await slack.chat.postMessage( {
+						channel: channel,
+						thread_ts: replyTarget,
+						text: `Sorry, I encountered an error while calling the GitHub API: ${ apiError.message }`
+					} );
+				} catch ( slackErrorWhileReportingApiError ) {
+					console.error( '[GitHub API] CRITICAL: Failed to call GitHub API AND failed to report the error to Slack:', slackErrorWhileReportingApiError );
+					console.error( '[GitHub API] Original API Error was:', apiError ); // Ensure original error is logged
+				}
 			}
 
-			// Rule 4: Check for specific error messages (using includes is okay here)
-			if ( isSubstantiveResponse ) {
-				if ( lowerRawReplyTrimmed.includes( 'encountered an error processing your request' ) ) {
-					console.log( `[Slack Handler] Specific error message found. Skipping feedback buttons.` );
+		} catch ( llmError ) {
+			console.error( '[GitHub API] Error querying GitHub workspace LLM:', llmError );
+			await slack.chat.postMessage( {
+				channel: channel,
+				thread_ts: replyTarget,
+				text: `Sorry, I encountered an error while trying to figure out the GitHub API call: ${ llmError.message }`
+			} );
+		}
+		return; // Stop processing after handling GitHub command
+	}
+
+	// If neither command was handled and returned, proceed to main logic
+	console.log( "[Slack Handler] No direct answer command detected, proceeding to main LLM." );
+
+	// --- Main Processing Logic (Only runs if no direct answer/command was handled and returned) ---
+	// Thread/workspace slugs are already determined above
+	try {
+		// Update Thinking Message (if thinking message promise resolved successfully)
+		const messageTs = await thinkingMessagePromise;
+		if ( messageTs ) {
+			thinkingMessageTs = messageTs; // Ensure the variable is set for later cleanup
+			try {
+				const thinkingMessages = [
+					":rocket: Blasting off to knowledge orbit...",
+					":alien: Consulting my alien overlords...",
+					":milky_way: Searching the cosmic database...",
+					":satellite: Sending signals to distant star systems...",
+					":ringed_planet: Circling Saturn for answers...",
+					":full_moon: Moonwalking through data...",
+					":dizzy: Getting lost in a black hole of information...",
+					":flying_saucer: Abducting relevant facts...",
+					":astronaut: Spacewalking through code repositories...",
+					":stars: Counting stars while the database loads...",
+					":rocket: Houston, we're solving a problem...",
+					":comet: Riding this comet to find your answer...",
+					":telescope: Peering into the knowledge universe...",
+					":robot_face: Engaging hyperdrive processors...",
+					":shooting_star: Wishing upon a star for good results...",
+					":new_moon: That's no moon, it's a data station...",
+					":sun_with_face: Harvesting solar energy for processing power...",
+					":space_invader: Zapping knowledge barriers...",
+					":satellite_antenna: Receiving signals from mission control...",
+					":comet: Entering knowledge atmosphere at high velocity...",
+					":earth_americas: Spinning the globe for perspective...",
+					":wrench: Tuning the warp core... stand by...",
+					":gear: Recalibrating the logic circuits...",
+					":zap: Charging the flux capacitor...",
+					":computer: Asking the ship's computer nicely...",
+					":bug: Debugging the asteroid belt...",
+					":crystal_ball: Consulting the cosmic crystal ball...",
+					":dna: Untangling cosmic DNA strands...",
+					":control_knobs: Adjusting the reality sliders...",
+					":hammer: Hitting the server with a wrench (gently)...",
+					":coffee: Brewing nebula coffee for the AI...",
+					":brain: Engaging the positronic brain...",
+					":light_bulb: Illuminating dark corners of the database...",
+					":spider_web: Navigating the galactic information web...",
+					":parachute: Deploying data retrieval parachute...",
+					":magnet: Attracting relevant data particles...",
+					":key: Finding the key to the data vault...",
+					":lock: Unlocking encrypted alien files...",
+					":hourglass_flowing_sand: Bending spacetime to speed things up...",
+					":stopwatch: Synchronizing galactic clocks...",
+					":radio: Tuning into the frequency of answers...",
+					":movie_camera: Replaying data logs...",
+					":joystick: Navigating the data stream... Level Up!",
+					":game_die: Rolling the dice on data retrieval...",
+					":jigsaw: Assembling puzzle pieces of information...",
+					":nerd_face: Calculating orbital mechanics of data...",
+					":exploding_head: Processing... processing... mind blown...",
+					":thinking_face: Pondering the vastness of the query...",
+					":detective: Investigating digital nebulae...",
+					":ninja: Sneaking through firewalls... silently...",
+					":ghost: Searching the ethereal data plane...",
+					":clown_face: Juggling data packets... don't drop them!",
+					":unicorn_face: Summoning mythical data creatures...",
+					":t-rex: Avoiding data dinosaurs...",
+					":cat: Herding Schrödinger's data cats...",
+					":dog: Fetching data sticks... Good AI!",
+					":hamster: Waking up the server hamster...",
+					":mouse: Guiding the space mouse through the maze...",
+					":owl: Consulting the wise old data owl...",
+					":worm: Digging through data tunnels...",
+					":microbe: Examining data under a quantum microscope...",
+					":dna: Re-sequencing the information genome...",
+					":test_tube: Experimenting with data solutions...",
+					":alembic: Distilling pure knowledge...",
+					":fire: Firing up the thrusters... almost there!",
+					":tornado: Caught in a data whirlwind...",
+					":rainbow: Following the data rainbow to the answer...",
+					":volcano: Erupting with information... soon!",
+					":ocean: Diving deep into the data ocean...",
+					":mountain: Climbing the mountain of queries...",
+					":desert: Crossing the data desert... water... I mean, answers!",
+					":seedling: Planting seeds of inquiry... waiting for growth...",
+					":evergreen_tree: Shaking the knowledge tree...",
+					":maple_leaf: Turning over a new data leaf...",
+					":mushroom: Foraging for fungi... I mean, facts!",
+					":chestnut: Cracking open data chestnuts...",
+					":globe_with_meridians: Plotting course across the digital globe...",
+					":world_map: Mapping the known data territories...",
+					":compass: Finding true north in the data wilderness...",
+					":manual_wheelchair: Rolling towards the solution... steadily...",
+					":flying_disc: Playing fetch with data frisbees...",
+					":kite: Letting the query kite fly high...",
+					":crystal_ball: Gazing into the data stream...",
+					":magic_wand: Waving the magic algorithm wand...",
+					":thread: Pulling the right data thread...",
+					":yarn: Untangling knots of code...",
+					":label: Tagging relevant information...",
+					":bookmark: Placing bookmarks in the data-verse...",
+					":newspaper: Checking the cosmic headlines for clues...",
+					":scroll: Unfurling ancient data scrolls...",
+					":clipboard: Taking notes from the universe...",
+					":pushpin: Pinpointing the exact answer...",
+					":triangular_ruler: Measuring the angles of the problem...",
+					":abacus: Calculating on the universal abacus...",
+					":alarm_clock: Waking up sleepy data nodes...",
+					":battery: Recharging cognitive functions...",
+					":electric_plug: Ensuring a solid connection to the knowledge grid...",
+					":fax: Faxing your request to the central AI core... (It's retro!)",
+					":floppy_disk: Accessing archaic data storage... please wait...",
+					":cd: Spinning the data disc... finding the right track..."
+				];
+				const thinkingText = thinkingMessages[ Math.floor( Math.random() * thinkingMessages.length ) ];
+				await slack.chat.update( {
+					channel,
+					ts: thinkingMessageTs,
+					text: thinkingText
+				} );
+				console.log( `[Slack Handler] Updated thinking message (ts: ${ thinkingMessageTs }) to: "${ thinkingText }"` );
+			} catch ( updateError ) {
+				console.warn( `[Slack Handler] Failed update thinking message:`, updateError.data?.error || updateError.message );
+			}
+		}
+
+		// 8. Construct LLM Input (Just the query)
+		let llmInputText = cleanedQuery; // Start with the base query
+		let threadHistory = "";
+		if (wasMentioned && threadTs) {
+			threadHistory = await fetchConversationHistory(channel, threadTs, originalTs, isDM);
+			console.log('[Slack Handler] Thread history fetched:', threadHistory ? 'Yes' : 'No');
+			if (threadHistory) {
+				llmInputText = `${threadHistory}\n\nLatest question: ${cleanedQuery}`;
+			}
+		}
+		// --- Add instruction for non-GitHub queries --- START
+		console.log( "[Slack Handler] This is NOT a GitHub command, adding LLM instructions." );
+		const instruction = '\n\nIMPORTANT: Please do not include context references (like "CONTEXT 0", "CONTEXT 1", etc.) in your response. Provide a clean, professional answer without these annotations.';
+		llmInputText += instruction;
+		// --- Add instruction for non-GitHub queries --- END
+
+		console.log( `[Slack Handler] Sending query to AnythingLLM Thread ${ workspaceSlugForThread }:${ anythingLLMThreadSlug }...` );
+
+		// 9. Query LLM using thread endpoint
+		const llmStartTime = Date.now();
+		const rawReply = await queryLlm( workspaceSlugForThread, anythingLLMThreadSlug, llmInputText );
+		console.log( `[Slack Handler] LLM call duration: ${ Date.now() - llmStartTime }ms` );
+		if ( ! rawReply ) throw new Error( 'LLM returned empty response.' );
+		console.log( "[Slack Handler Debug] Raw LLM Reply:\n", rawReply );
+
+		// 10. Process and Send Response
+
+		// 10a. Refined Check for Substantive Response
+		let isSubstantiveResponse = false;
+		const lowerRawReplyTrimmed = rawReply.toLowerCase().trim();
+
+		// Rule 1: Check length first
+		if ( lowerRawReplyTrimmed.length < MIN_SUBSTANTIVE_RESPONSE_LENGTH ) {
+			console.log( `[Slack Handler] Reply is short (${ lowerRawReplyTrimmed.length } < ${ MIN_SUBSTANTIVE_RESPONSE_LENGTH }). Skipping feedback buttons.` );
+			isSubstantiveResponse = false;
+		}
+
+		// Rule 2: Check for exact, simple non-substantive replies (only if still substantive)
+		if ( isSubstantiveResponse ) {
+			const exactNonSubstantive = [
+				'ok', 'done', 'hello', 'hi', 'hey', 'thanks', 'thank you'
+			];
+			if ( exactNonSubstantive.includes( lowerRawReplyTrimmed ) ) {
+				console.log( `[Slack Handler] Exact non-substantive match found: "${ lowerRawReplyTrimmed }". Skipping feedback buttons.` );
+				isSubstantiveResponse = false;
+			}
+		}
+
+		// Rule 3: Check if the reply STARTS WITH common refusal or filler phrases (only if still substantive)
+		if ( isSubstantiveResponse ) {
+			const startingNonSubstantive = [
+				'sorry', 'i cannot', 'i am unable', "i don't know", "i do not know", 'i have no information',
+				'how can i help', 'conversation reset', 'context will be ignored',
+				'hello ', 'hi ', 'hey ', // Keep space for greetings followed by more
+				'encountered an error'
+			];
+			for ( const pattern of startingNonSubstantive ) {
+				if ( lowerRawReplyTrimmed.startsWith( pattern ) ) {
+					console.log( `[Slack Handler] Non-substantive starting pattern found: "${ pattern }". Skipping feedback buttons.` );
 					isSubstantiveResponse = false;
+					break;
 				}
 			}
+		}
 
-			// Define feedback blocks structure (avoids repetition)
-			const feedbackButtonElements = [
-				{
-					"type": "button",
-					"text": { "type": "plain_text", "text": "👎", "emoji": true },
-					"style": "danger",
-					"value": "bad",
-					"action_id": "feedback_bad"
-				},
-				{
-					"type": "button",
-					"text": { "type": "plain_text", "text": "👌", "emoji": true },
-					"value": "ok",
-					"action_id": "feedback_ok"
-				},
-				{
-					"type": "button",
-					"text": { "type": "plain_text", "text": "👍", "emoji": true },
-					"style": "primary",
-					"value": "great",
-					"action_id": "feedback_great"
+		// Rule 4: Check for specific error messages (using includes is okay here)
+		if ( isSubstantiveResponse ) {
+			if ( lowerRawReplyTrimmed.includes( 'encountered an error processing your request' ) ) {
+				console.log( `[Slack Handler] Specific error message found. Skipping feedback buttons.` );
+				isSubstantiveResponse = false;
+			}
+		}
+
+		// Define feedback blocks structure (avoids repetition)
+		const feedbackButtonElements = [
+			{
+				"type": "button",
+				"text": { "type": "plain_text", "text": "👎", "emoji": true },
+				"style": "danger",
+				"value": "bad",
+				"action_id": "feedback_bad"
+			},
+			{
+				"type": "button",
+				"text": { "type": "plain_text", "text": "👌", "emoji": true },
+				"value": "ok",
+				"action_id": "feedback_ok"
+			},
+			{
+				"type": "button",
+				"text": { "type": "plain_text", "text": "👍", "emoji": true },
+				"style": "primary",
+				"value": "great",
+				"action_id": "feedback_great"
+			}
+		];
+		const feedbackBlock = [
+			{ "type": "divider" },
+			{
+				"type": "actions",
+				"block_id": `feedback_${ originalTs }_${ workspaceSlugForThread }`,
+				"elements": feedbackButtonElements
+			}
+		];
+
+		// 10b. Extract Segments
+		const segments = extractTextAndCode( rawReply );
+		console.log( `[Slack Handler] Extracted ${ segments.length } segments (text/code). Substantive: ${ isSubstantiveResponse }` );
+
+		// *** ADDED: Log substantive check result ***
+		console.log( `[Slack Handler DEBUG] isSubstantiveResponse = ${ isSubstantiveResponse }` );
+		console.log( `[Slack Handler DEBUG] Using replyTargetTS: ${ replyTarget } for posting response.` );
+
+		// 10c. Process and Send Each Segment
+		for ( let i = 0; i < segments.length; i++ ) {
+			const segment = segments[ i ];
+			const isLastSegment = i === segments.length - 1;
+			let blocksToSend = []; // Array to hold blocks for THIS segment
+			let fallbackText = ''; // Initialize fallbackText for the segment
+
+			if ( segment.type === 'text' ) {
+				// --- Handle Text Segments ---
+				if ( ! segment.content || segment.content.trim().length === 0 ) continue;
+
+				console.log( `[Slack Handler DEBUG] Converting text segment to single rich_text block` );
+				const richTextBlock = markdownToRichTextBlock( segment.content, `msg_${ Date.now() }_${ i }` );
+
+				if ( richTextBlock ) {
+					blocksToSend.push( richTextBlock );
+					// Generate fallback text for THIS segment
+					fallbackText = segment.content.replace( /\*\*|_|_|`|\[.*?\]\(.*?\)/g, '' ).substring( 0, 200 );
+				} else {
+					console.warn( `[Slack Handler] Failed to generate rich text block for text segment ${ i }` );
+					continue; // Skip if generation failed
 				}
-			];
-			const feedbackBlock = [
-				{ "type": "divider" },
-				{
-					"type": "actions",
-					"block_id": `feedback_${ originalTs }_${ workspaceSlugForThread }`,
-					"elements": feedbackButtonElements
-				}
-			];
 
-			// 10b. Extract Segments
-			const segments = extractTextAndCode( rawReply );
-			console.log( `[Slack Handler] Extracted ${ segments.length } segments (text/code). Substantive: ${ isSubstantiveResponse }` );
+			} else if ( segment.type === 'code' ) {
+				// --- Handle Code Segments ---
+				const language = segment.language || 'text';
+				const filetype = getSlackFiletype( language );
 
-			// *** ADDED: Log substantive check result ***
-			console.log( `[Slack Handler DEBUG] isSubstantiveResponse = ${ isSubstantiveResponse }` );
-			console.log( `[Slack Handler DEBUG] Using replyTargetTS: ${ replyTarget } for posting response.` );
-
-			// 10c. Process and Send Each Segment
-			for ( let i = 0; i < segments.length; i++ ) {
-				const segment = segments[ i ];
-				const isLastSegment = i === segments.length - 1;
-				let blocksToSend = []; // Array to hold blocks for THIS segment
-				let fallbackText = ''; // Initialize fallbackText for the segment
-
-				if ( segment.type === 'text' ) {
-					// --- Handle Text Segments ---
+				if ( filetype === 'json' ) {
+					// JSON handled separately, fallback generation inside its block
+					// ... (existing JSON handling code) ...
+					// Ensure fallbackText is defined if JSON fails
+					fallbackText = `⚠️ Failed to upload JSON snippet...`; // Simplified for this scope
+				} else {
+					// --- Format Other Code Blocks Inline ---
 					if ( ! segment.content || segment.content.trim().length === 0 ) continue;
-
-					console.log( `[Slack Handler DEBUG] Converting text segment to single rich_text block` );
-					const richTextBlock = markdownToRichTextBlock( segment.content, `msg_${ Date.now() }_${ i }` );
+					const inlineCodeContent = `\`\`\`${ language }\n${ segment.content }\`\`\``;
+					console.log( `[Slack Handler DEBUG] Converting code segment (${ language }) to single rich_text block` );
+					const richTextBlock = markdownToRichTextBlock( inlineCodeContent, `code_${ Date.now() }_${ i }` );
 
 					if ( richTextBlock ) {
 						blocksToSend.push( richTextBlock );
-						// Generate fallback text for THIS segment
-						fallbackText = segment.content.replace( /\*\*|_|_|`|\[.*?\]\(.*?\)/g, '' ).substring( 0, 200 );
+						// Generate fallback text for THIS code segment
+						fallbackText = `Code Snippet (${ language })`;
 					} else {
-						console.warn( `[Slack Handler] Failed to generate rich text block for text segment ${ i }` );
+						console.warn( `[Slack Handler] Failed to generate rich text block for code segment ${ i }` );
 						continue; // Skip if generation failed
 					}
-
-				} else if ( segment.type === 'code' ) {
-					// --- Handle Code Segments ---
-					const language = segment.language || 'text';
-					const filetype = getSlackFiletype( language );
-
-					if ( filetype === 'json' ) {
-						// JSON handled separately, fallback generation inside its block
-						// ... (existing JSON handling code) ...
-						// Ensure fallbackText is defined if JSON fails
-						fallbackText = `⚠️ Failed to upload JSON snippet...`; // Simplified for this scope
-					} else {
-						// --- Format Other Code Blocks Inline ---
-						if ( ! segment.content || segment.content.trim().length === 0 ) continue;
-						const inlineCodeContent = `\`\`\`${ language }\n${ segment.content }\`\`\``;
-						console.log( `[Slack Handler DEBUG] Converting code segment (${ language }) to single rich_text block` );
-						const richTextBlock = markdownToRichTextBlock( inlineCodeContent, `code_${ Date.now() }_${ i }` );
-
-						if ( richTextBlock ) {
-							blocksToSend.push( richTextBlock );
-							// Generate fallback text for THIS code segment
-							fallbackText = `Code Snippet (${ language })`;
-						} else {
-							console.warn( `[Slack Handler] Failed to generate rich text block for code segment ${ i }` );
-							continue; // Skip if generation failed
-						}
-					}
-				}
-
-				if ( blocksToSend.length === 0 && filetype !== 'json' ) { // Skip empty non-JSON segments
-					console.log( `[Slack Handler] No blocks generated for segment ${ i }, skipping post.` );
-					continue;
-				}
-
-				// Post the message for the current segment
-				try {
-					const postResult = await slack.chat.postMessage( {
-						channel,
-						thread_ts: replyTarget,
-						text: fallbackText,
-						blocks: blocksToSend
-					} );
-					const mainMessageTs = postResult?.ts;
-					console.log( `[Slack Handler] Posted segment ${ i + 1 }/${ segments.length } (ts: ${ mainMessageTs }).` );
-
-
-					// Post feedback buttons separately IF it's the last segment AND we have fallback text
-					if ( isLastSegment && isSubstantiveResponse && mainMessageTs && fallbackText ) {
-						try {
-							console.log( `[Slack Handler DEBUG] Posting feedback buttons separately after final segment ${ mainMessageTs }.` );
-							// Truncate fallback text heavily for block_id and URL-encode it
-							const safeFallbackText = fallbackText.substring( 0, 150 ); // Limit to ~150 chars for safety
-							const encodedFallback = encodeURIComponent( safeFallbackText );
-							const finalFeedbackBlock = [
-								{ "type": "divider" },
-								// Format: feedback_originalTs_sphere_encodedText
-								{
-									"type": "actions",
-									"block_id": `feedback_${ originalTs }_${ workspaceSlugForThread }_${ encodedFallback }`,
-									"elements": feedbackButtonElements
-								}
-							];
-							const feedbackPostResult = await slack.chat.postMessage( {
-								channel,
-								thread_ts: replyTarget,
-								text: "Feedback:",
-								blocks: finalFeedbackBlock
-							} );
-							console.log( `[Slack Handler] Posted feedback buttons separately (ts: ${ feedbackPostResult?.ts }).` );
-						} catch ( feedbackPostError ) {
-							console.error( `[Slack Error] Failed to post feedback buttons separately:`, feedbackPostError.data?.error || feedbackPostError.message );
-						}
-					}
-
-				} catch ( postError ) {
-					console.error( `[Slack Error] Failed post segment ${ i + 1 }:`, postError.data?.error || postError.message );
-					await slack.chat.postMessage( {
-						channel,
-						thread_ts: replyTarget,
-						text: `_(Error displaying part ${ i + 1 } of the response)_`
-					} ).catch( () => {
-					} );
 				}
 			}
-			// -- End Segment Processing Loop --
 
-		} catch ( error ) {
-			// 11. Handle Errors
-			console.error( '[Slack Handler Error]', error );
+			if ( blocksToSend.length === 0 && filetype !== 'json' ) { // Skip empty non-JSON segments
+				console.log( `[Slack Handler] No blocks generated for segment ${ i }, skipping post.` );
+				continue;
+			}
+
+			// Post the message for the current segment
 			try {
+				const postResult = await slack.chat.postMessage( {
+					channel,
+					thread_ts: replyTarget,
+					text: fallbackText,
+					blocks: blocksToSend
+				} );
+				const mainMessageTs = postResult?.ts;
+				console.log( `[Slack Handler] Posted segment ${ i + 1 }/${ segments.length } (ts: ${ mainMessageTs }).` );
+
+
+				// Post feedback buttons separately IF it's the last segment AND we have fallback text
+				if ( isLastSegment && isSubstantiveResponse && mainMessageTs && fallbackText ) {
+					try {
+						console.log( `[Slack Handler DEBUG] Posting feedback buttons separately after final segment ${ mainMessageTs }.` );
+						// Truncate fallback text heavily for block_id and URL-encode it
+						const safeFallbackText = fallbackText.substring( 0, 150 ); // Limit to ~150 chars for safety
+						const encodedFallback = encodeURIComponent( safeFallbackText );
+						const finalFeedbackBlock = [
+							{ "type": "divider" },
+							// Format: feedback_originalTs_sphere_encodedText
+							{
+								"type": "actions",
+								"block_id": `feedback_${ originalTs }_${ workspaceSlugForThread }_${ encodedFallback }`,
+								"elements": feedbackButtonElements
+							}
+						];
+						const feedbackPostResult = await slack.chat.postMessage( {
+							channel,
+							thread_ts: replyTarget,
+							text: "Feedback:",
+							blocks: finalFeedbackBlock
+						} );
+						console.log( `[Slack Handler] Posted feedback buttons separately (ts: ${ feedbackPostResult?.ts }).` );
+					} catch ( feedbackPostError ) {
+						console.error( `[Slack Error] Failed to post feedback buttons separately:`, feedbackPostError.data?.error || feedbackPostError.message );
+					}
+				}
+
+			} catch ( postError ) {
+				console.error( `[Slack Error] Failed post segment ${ i + 1 }:`, postError.data?.error || postError.message );
 				await slack.chat.postMessage( {
 					channel,
 					thread_ts: replyTarget,
-					text: `⚠️ Oops! I encountered an error processing your request. (Workspace: ${ workspaceSlugForThread || 'unknown' })`
+					text: `_(Error displaying part ${ i + 1 } of the response)_`
+				} ).catch( () => {
 				} );
-			} catch ( slackError ) {
-				console.error( "[Slack Error] Failed post error message:", slackError.data?.error || slackError.message );
 			}
-
-		} finally {
-			// 12. Cleanup Thinking Message
-			if ( thinkingMessageTs ) {
-				try {
-					await slack.chat.delete( { channel: channel, ts: thinkingMessageTs } );
-					console.log( `[Slack Handler] Deleted thinking message (ts: ${ thinkingMessageTs }).` );
-				} catch ( delErr ) {
-					console.warn( "Failed delete thinking message:", delErr.data?.error || delErr.message );
-				}
-			}
-			const handlerEndTime = Date.now();
-			console.log( `[Slack Handler] Finished processing event for ${ userId }. Total duration: ${ handlerEndTime - handlerStartTime }ms` );
 		}
+		// -- End Segment Processing Loop --
+
+	} catch ( error ) {
+		// 11. Handle Errors
+		console.error( '[Slack Handler Error]', error );
+		try {
+			await slack.chat.postMessage( {
+				channel,
+				thread_ts: replyTarget,
+				text: `⚠️ Oops! I encountered an error processing your request. (Workspace: ${ workspaceSlugForThread || 'unknown' })`
+			} );
+		} catch ( slackError ) {
+			console.error( "[Slack Error] Failed post error message:", slackError.data?.error || slackError.message );
+		}
+
+	} finally {
+		// 12. Cleanup Thinking Message
+		if ( thinkingMessageTs ) {
+			try {
+				await slack.chat.delete( { channel: channel, ts: thinkingMessageTs } );
+				console.log( `[Slack Handler] Deleted thinking message (ts: ${ thinkingMessageTs }).` );
+			} catch ( delErr ) {
+				console.warn( "Failed delete thinking message:", delErr.data?.error || delErr.message );
+			}
+		}
+		const handlerEndTime = Date.now();
+		console.log( `[Slack Handler] Finished processing event for ${ userId }. Total duration: ${ handlerEndTime - handlerStartTime }ms` );
 	}
 }
 

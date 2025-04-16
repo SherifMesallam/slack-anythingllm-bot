@@ -14,7 +14,7 @@ export const userWorkspaceMapping = JSON.parse(process.env.SLACK_USER_WORKSPACE_
 export const enableUserWorkspaces = process.env.ENABLE_USER_WORKSPACES === 'true';
 
 // Added fallbackWorkspace
-export const fallbackWorkspace = process.env.FALLBACK_WORKSPACE_SLUG || null;
+export const fallbackWorkspace = process.env.FALLBACK_WORKSPACE_SLUG || 'all';
 
 // Added workspaceMapping for channel/default routing
 export const workspaceMapping = JSON.parse(process.env.WORKSPACE_MAPPING || '{}');
