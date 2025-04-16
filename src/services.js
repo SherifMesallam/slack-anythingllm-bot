@@ -1,6 +1,8 @@
 import { createClient } from 'redis';
 import pg from 'pg';
-import { redisUrl, databaseUrl } from './config.js';
+import { Octokit } from '@octokit/rest';
+import { redisUrl, databaseUrl, botUserId, developerId, feedbackEnabled, githubToken, githubFeaturesEnabled } from './config.js';
+import logger from './logger.js';
 
 // --- Redis Client Setup ---
 export let redisClient;
@@ -57,6 +59,180 @@ if (databaseUrl) {
             release: () => {}
         })
     };
+}
+
+// --- GitHub Service (Octokit) ---
+let octokit = null;
+if (githubFeaturesEnabled && githubToken) {
+    logger.info('[GitHub Service] Initializing Octokit...');
+    octokit = new Octokit({ auth: githubToken });
+} else if (githubFeaturesEnabled && !githubToken) {
+    logger.warn('[GitHub Service] GitHub features enabled but GITHUB_TOKEN not set. GitHub features will be unavailable.');
+} else {
+    logger.info('[GitHub Service] GitHub features are disabled.');
+}
+
+/**
+ * Fetches the latest release for a given GitHub repository.
+ * @param {string} owner - The repository owner.
+ * @param {string} repo - The repository name.
+ * @returns {Promise<{tagName: string, publishedAt: string, url: string} | null>} Release details or null if not found/error/disabled.
+ */
+export async function getLatestRelease(owner, repo) {
+    // Check if feature enabled and client initialized
+    if (!githubFeaturesEnabled || !octokit) {
+        logger.warn({ owner, repo }, "Attempted to get latest release but GitHub features are disabled or Octokit not initialized.");
+        return null;
+    }
+
+    if (!owner || !repo) {
+        logger.error('[GitHub Service] getLatestRelease requires owner and repo arguments.');
+        return null;
+    }
+
+    const logContext = { owner, repo };
+    logger.debug(logContext, 'Fetching latest release from GitHub');
+    try {
+        const response = await octokit.repos.getLatestRelease({ owner, repo });
+        if (response.status === 200 && response.data) {
+            logger.info({ ...logContext, tag: response.data.tag_name }, 'Found latest release');
+            return {
+                tagName: response.data.tag_name,
+                publishedAt: response.data.published_at,
+                url: response.data.html_url
+            };
+        } else {
+            // This case might not be reachable if getLatestRelease throws on non-200
+            logger.warn({ ...logContext, status: response.status }, 'Unexpected response status from GitHub API for latest release');
+            return null;
+        }
+    } catch (error) {
+        if (error.status === 404) {
+            // 404 is common if a repo exists but has no releases yet
+            logger.info({ ...logContext }, 'No releases found for repository (404).');
+        } else {
+            // Log other errors more verbosely
+            logger.error({ ...logContext, status: error.status, message: error.message, error }, 'Error fetching latest release from GitHub');
+        }
+        return null;
+    }
+}
+
+/**
+ * Fetches basic details for a specific Pull Request.
+ * @param {string} owner - The repository owner.
+ * @param {string} repo - The repository name.
+ * @param {number} pullNumber - The PR number.
+ * @returns {Promise<{title: string, url: string, state: string, user: string, body: string | null} | null>} PR details or null.
+ */
+export async function getPrDetails(owner, repo, pullNumber) {
+    if (!githubFeaturesEnabled || !octokit) {
+        logger.warn({ owner, repo, pullNumber }, "Attempted to get PR details but GitHub features are disabled or Octokit not initialized.");
+        return null;
+    }
+    if (!owner || !repo || !pullNumber) {
+        logger.error('[GitHub Service] getPrDetails requires owner, repo, and pullNumber.');
+        return null;
+    }
+
+    const logContext = { owner, repo, pullNumber };
+    logger.debug(logContext, 'Fetching PR details from GitHub');
+    try {
+        const { data: pr } = await octokit.pulls.get({
+            owner,
+            repo,
+            pull_number: pullNumber,
+        });
+        logger.info({ ...logContext, title: pr.title }, 'Found PR details');
+        return {
+            title: pr.title,
+            url: pr.html_url,
+            state: pr.state, // e.g., 'open', 'closed'
+            user: pr.user?.login || 'unknown',
+            body: pr.body
+        };
+    } catch (error) {
+        logger.error({ ...logContext, status: error.status, message: error.message, error }, 'Error fetching PR details from GitHub');
+        return null;
+    }
+}
+
+/**
+ * Fetches the list of files changed in a specific Pull Request.
+ * @param {string} owner - The repository owner.
+ * @param {string} repo - The repository name.
+ * @param {number} pullNumber - The PR number.
+ * @returns {Promise<Array<{filename: string, status: string, changes: number, additions: number, deletions: number}> | null>} Array of file details or null.
+ */
+export async function getPrFiles(owner, repo, pullNumber) {
+    if (!githubFeaturesEnabled || !octokit) {
+        logger.warn({ owner, repo, pullNumber }, "Attempted to get PR files but GitHub features are disabled or Octokit not initialized.");
+        return null;
+    }
+    if (!owner || !repo || !pullNumber) {
+        logger.error('[GitHub Service] getPrFiles requires owner, repo, and pullNumber.');
+        return null;
+    }
+
+    const logContext = { owner, repo, pullNumber };
+    logger.debug(logContext, 'Fetching PR files from GitHub');
+    try {
+        // GitHub API might paginate this, fetch all pages if necessary (up to a limit)
+        const files = await octokit.paginate(octokit.pulls.listFiles, {
+            owner,
+            repo,
+            pull_number: pullNumber,
+            per_page: 100, // Max per page
+        });
+
+        logger.info({ ...logContext, fileCount: files.length }, 'Found PR files');
+        return files.map(file => ({
+            filename: file.filename,
+            status: file.status, // e.g., 'added', 'modified', 'removed'
+            changes: file.changes,
+            additions: file.additions,
+            deletions: file.deletions
+        }));
+    } catch (error) {
+        logger.error({ ...logContext, status: error.status, message: error.message, error }, 'Error fetching PR files from GitHub');
+        return null;
+    }
+}
+
+/**
+ * Fetches the diff for a specific Pull Request.
+ * @param {string} owner - The repository owner.
+ * @param {string} repo - The repository name.
+ * @param {number} pullNumber - The PR number.
+ * @returns {Promise<string | null>} The diff content as a string or null.
+ */
+export async function getPrDiff(owner, repo, pullNumber) {
+    if (!githubFeaturesEnabled || !octokit) {
+        logger.warn({ owner, repo, pullNumber }, "Attempted to get PR diff but GitHub features are disabled or Octokit not initialized.");
+        return null;
+    }
+    if (!owner || !repo || !pullNumber) {
+        logger.error('[GitHub Service] getPrDiff requires owner, repo, and pullNumber.');
+        return null;
+    }
+
+    const logContext = { owner, repo, pullNumber };
+    logger.debug(logContext, 'Fetching PR diff from GitHub');
+    try {
+        const { data: diff } = await octokit.pulls.get({
+            owner,
+            repo,
+            pull_number: pullNumber,
+            mediaType: {
+                format: 'diff' // Request the diff format
+            }
+        });
+        logger.info({ ...logContext, diffLength: diff?.length }, 'Found PR diff');
+        return diff; // Returns the diff content as a string
+    } catch (error) {
+        logger.error({ ...logContext, status: error.status, message: error.message, error }, 'Error fetching PR diff from GitHub');
+        return null;
+    }
 }
 
 // Graceful shutdown function for services
@@ -155,6 +331,78 @@ export async function storeAnythingLLMThreadMapping(channelId, slackThreadTs, wo
     } catch (err) {
         console.error("[Service/ThreadMap DB Error] Failed storing mapping:", err);
         return false;
+    } finally {
+        if (client) client.release();
+    }
+}
+
+// --- Feedback Storage ---
+/**
+ * Stores user feedback received from Slack interactions into the database.
+ * Checks the feedbackEnabled feature flag before proceeding.
+ * @param {object} feedbackData - Object containing feedback details.
+ * @param {number|null} feedbackData.feedback_value - e.g., 1 for positive, -1 for negative.
+ * @param {string|null} feedbackData.user_id - Slack User ID.
+ * @param {string|null} feedbackData.channel_id - Slack Channel ID.
+ * @param {string|null} feedbackData.bot_message_ts - Timestamp of the bot message being reacted to.
+ * @param {string|null} feedbackData.original_user_message_ts - Timestamp of the original user message.
+ * @param {string|null} feedbackData.action_id - ID of the action triggering feedback (e.g., button ID).
+ * @param {string|null} feedbackData.sphere_slug - Workspace slug associated with the interaction.
+ * @param {string|null} feedbackData.bot_message_text - Text content of the bot message.
+ * @param {string|null} feedbackData.original_user_message_text - Text content of the original user message.
+ * @returns {Promise<void>}
+ */
+export async function storeFeedback(feedbackData) {
+    // Check feature flag first
+    if (!feedbackEnabled) {
+        logger.debug('Feedback system is disabled. Skipping feedback storage.');
+        return;
+    }
+
+    // Check if DB is available
+    if (!dbPool) {
+        logger.warn({ feedbackData }, "Database not configured, cannot store feedback. Logging to console instead.");
+        // Fallback to console logging if DB is down but feature is enabled
+        logger.info({ feedbackData }, "--- FEEDBACK (Console Log) ---");
+        return;
+    }
+
+    const insertQuery = `
+        INSERT INTO feedback (feedback_value, user_id, channel_id, bot_message_ts, original_user_message_ts, action_id, sphere_slug, bot_message_text, original_user_message_text)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id;`;
+    // Map feedbackData to values, ensuring null if undefined/missing
+    const values = [
+        feedbackData.feedback_value ?? null,
+        feedbackData.user_id ?? null,
+        feedbackData.channel_id ?? null,
+        feedbackData.bot_message_ts ?? null,
+        feedbackData.original_user_message_ts ?? null,
+        feedbackData.action_id ?? null,
+        feedbackData.sphere_slug ?? null,
+        feedbackData.bot_message_text ?? null,
+        feedbackData.original_user_message_text ?? null
+    ];
+
+    const logContext = {
+        user: values[1],
+        value: values[0],
+        channel: values[2],
+        bot_ts: values[3],
+        sphere: values[6]
+    };
+
+    let client;
+    try {
+        client = await dbPool.connect();
+        logger.debug(logContext, 'Inserting feedback into database');
+        const result = await client.query(insertQuery, values);
+        if (result.rows?.[0]?.id) {
+             logger.info({ ...logContext, feedbackId: result.rows[0].id }, 'Feedback saved successfully');
+        } else {
+             logger.warn(logContext, 'Feedback insert query executed but did not return ID.');
+        }
+    } catch (err) {
+        logger.error({ ...logContext, error: err }, 'Database error storing feedback');
     } finally {
         if (client) client.release();
     }

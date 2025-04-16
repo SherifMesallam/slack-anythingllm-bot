@@ -39,6 +39,37 @@ export const WORKSPACE_OVERRIDE_COMMAND_PREFIX = '#'; // Prefix to trigger manua
 export const MIN_SUBSTANTIVE_RESPONSE_LENGTH = process.env.MIN_SUBSTANTIVE_RESPONSE_LENGTH ? parseInt(process.env.MIN_SUBSTANTIVE_RESPONSE_LENGTH) : 100; // Minimum length for a response to be considered substantive enough for feedback buttons
 export const GITHUB_OWNER = process.env.GITHUB_OWNER || 'gravityforms'; // Default GH owner
 
+// --- Intent Detection Configuration ---
+export const intentRoutingEnabled = process.env.INTENT_ROUTING_ENABLED === 'true'; // Flag to enable/disable
+export const intentProvider = process.env.INTENT_PROVIDER || 'none'; // 'gemini', 'none', etc.
+export const intentConfidenceThreshold = parseFloat(process.env.INTENT_CONFIDENCE_THRESHOLD || '0.75'); // Minimum confidence score
+export const geminiApiKey = process.env.GEMINI_API_KEY || null; // API key for Gemini provider
+// Workspace slugs for specific LLM tasks
+export const githubIssueAnalysisWorkspaceSlug = process.env.GITHUB_ISSUE_ANALYSIS_WORKSPACE_SLUG || null;
+export const githubPrReviewWorkspaceSlug = process.env.GITHUB_PR_REVIEW_WORKSPACE_SLUG || null;
+
+// List of all possible intents the bot might detect
+export const possibleIntents = [
+  'general_query',          // Default fallback for general questions
+  'export_thread',          // User wants to export the current thread
+  'delete_message',         // User wants to delete the bot\'s last message
+  'github_release_check',   // User is asking for the latest release of a repo
+  'github_issue_details',   // User wants basic details about a specific issue
+  'github_pr_details',      // User wants basic details about a specific PR
+  'github_api_call',        // User is asking to make a generic GitHub API call
+  'github_issue_analysis',  // User wants an LLM analysis of a GitHub issue
+  'github_pr_review'        // User wants an LLM review of a GitHub PR
+  // Add any other distinct actions the bot can perform
+];
+
+// --- Command Prefixes ---
+// Map prefixes to handler categories or specific handlers
+export const commandPrefixes = {
+  github: 'gh-', // Example: gh-issue <repo>#<number>
+  export: 'export-', // Example: export-thread
+  // Add other prefixes as needed
+};
+
 // --- Cache Configuration ---
 export const DUPLICATE_EVENT_TTL = 600; // 10 minutes
 export const RESET_HISTORY_TTL = 300; // 5 minutes
@@ -76,6 +107,16 @@ export function validateConfig() {
     if (!databaseUrl) console.warn("⚠️ DATABASE_URL not set. Feedback storage disabled (will log to console).");
     if (!githubToken) console.warn("⚠️ GITHUB_TOKEN not set. GitHub features (release check) disabled.");
     if (!formatterWorkspaceSlug) console.warn("⚠️ FORMATTER_WORKSPACE_SLUG not set. GitHub responses will be sent as raw JSON."); // Added warning
+    // Add validation checks for new intent/GitHub config if necessary
+    if (intentRoutingEnabled && intentProvider === 'gemini' && !geminiApiKey) {
+        console.error("❌ Intent routing enabled with Gemini provider, but GEMINI_API_KEY is not set!");
+    }
+    if (githubFeaturesEnabled && !githubIssueAnalysisWorkspaceSlug) {
+        console.warn("⚠️ GITHUB_ISSUE_ANALYSIS_WORKSPACE_SLUG not set. Issue analysis feature may not work.");
+    }
+    if (githubFeaturesEnabled && !githubPrReviewWorkspaceSlug) {
+        console.warn("⚠️ GITHUB_PR_REVIEW_WORKSPACE_SLUG not set. PR review feature may not work.");
+    }
 
     console.log("[Config] Basic validation complete.");
 }
